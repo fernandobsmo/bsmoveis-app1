@@ -1,0 +1,1097 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no"/>
+  <meta name="theme-color" content="#1A3A5C"/>
+  <meta name="apple-mobile-web-app-capable" content="yes"/>
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"/>
+  <title>BS Móveis Estofados — Sistema de Vendas</title>
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+  <script src="https://unpkg.com/recharts@2.8.0/umd/Recharts.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <style>
+    *{box-sizing:border-box;margin:0;padding:0}
+    body{font-family:Arial,sans-serif;background:#F0F4FA;-webkit-tap-highlight-color:transparent}
+    select,input,textarea,button{font-family:Arial,sans-serif}
+    ::-webkit-scrollbar{width:4px;height:4px}
+    ::-webkit-scrollbar-track{background:#f1f1f1}
+    ::-webkit-scrollbar-thumb{background:#1A3A5C;border-radius:2px}
+    a{-webkit-tap-highlight-color:transparent}
+  </style>
+</head>
+<body>
+<div id="root"></div>
+
+<script>
+/* ── localStorage adapter para window.storage ── */
+window.storage = {
+  get: function(key, shared) {
+    return new Promise(function(resolve, reject) {
+      try {
+        var val = localStorage.getItem(key);
+        if (val === null) reject(new Error('Key not found: ' + key));
+        else resolve({ key: key, value: val, shared: !!shared });
+      } catch(e) { reject(e); }
+    });
+  },
+  set: function(key, value, shared) {
+    return new Promise(function(resolve) {
+      try {
+        localStorage.setItem(key, typeof value === 'string' ? value : JSON.stringify(value));
+        resolve({ key: key, value: value, shared: !!shared });
+      } catch(e) { resolve(null); }
+    });
+  },
+  delete: function(key, shared) {
+    return new Promise(function(resolve) {
+      try { localStorage.removeItem(key); } catch(e) {}
+      resolve({ key: key, deleted: true, shared: !!shared });
+    });
+  },
+  list: function(prefix, shared) {
+    return new Promise(function(resolve) {
+      var keys = [];
+      try {
+        for (var i = 0; i < localStorage.length; i++) {
+          var k = localStorage.key(i);
+          if (!prefix || k.startsWith(prefix)) keys.push(k);
+        }
+      } catch(e) {}
+      resolve({ keys: keys, prefix: prefix, shared: !!shared });
+    });
+  }
+};
+</script>
+
+<script type="text/babel">
+const { useState, useRef, useEffect } = React;
+const { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } = Recharts;
+
+/* ════════════════════════════════════════════════
+   LOGO
+════════════════════════════════════════════════ */
+function LogoBS({size=44}) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
+      <rect width="100" height="100" rx="14" fill="#EAF4FF"/>
+      <ellipse cx="50" cy="68" rx="40" ry="7" fill="none" stroke="#00BCD4" strokeWidth="3.5"/>
+      <path d="M 18 72 Q 52 60 82 72" fill="none" stroke="#C62828" strokeWidth="2.5" strokeLinecap="round"/>
+      <text x="5" y="70" fontFamily="Georgia,serif" fontSize="58" fontWeight="bold" fill="#1565C0">B</text>
+      <text x="50" y="70" fontFamily="Georgia,serif" fontSize="58" fontWeight="bold" fill="#7B1FA2">S</text>
+      <text x="50" y="15" fontFamily="Arial,sans-serif" fontSize="11" fontWeight="bold" fill="#37474F" textAnchor="middle" letterSpacing="2">GRUPO</text>
+    </svg>
+  );
+}
+
+/* ════════════════════════════════════════════════
+   CONSTANTES
+════════════════════════════════════════════════ */
+var SK = "bsmoveis-unified-v3";
+
+var ETAPAS = [
+  {id:"contato",   label:"📞 Contato",    cor:"#1565C0", bg:"#E3F2FD"},
+  {id:"simulacao", label:"📱 Simulação",  cor:"#6A1B9A", bg:"#F3E5F5"},
+  {id:"orcamento", label:"📋 Orçamento",  cor:"#E65100", bg:"#FFF3E0"},
+  {id:"negociacao",label:"🤝 Negociação", cor:"#F57F17", bg:"#FFFDE7"},
+  {id:"fechado",   label:"✅ Fechado",     cor:"#1B5E20", bg:"#E8F5E9"},
+  {id:"entregue",  label:"🚚 Entregue",   cor:"#004D40", bg:"#E0F2F1"},
+  {id:"posvenda",  label:"⭐ Pós-Venda",  cor:"#37474F", bg:"#ECEFF1"},
+  {id:"perdido",   label:"❌ Perdido",     cor:"#B71C1C", bg:"#FFEBEE"},
+];
+
+var SPRODS = [
+  {id:"aguardando", label:"⏳ Aguardando", cor:"#78909C", bg:"#ECEFF1"},
+  {id:"desmontado", label:"🔧 Desmontado", cor:"#E65100", bg:"#FFF3E0"},
+  {id:"em_tecido",  label:"🧵 Em Tecido",  cor:"#6A1B9A", bg:"#F3E5F5"},
+  {id:"acabamento", label:"✂️ Acabamento", cor:"#1565C0", bg:"#E3F2FD"},
+  {id:"pronto",     label:"✅ Pronto",      cor:"#1B5E20", bg:"#E8F5E9"},
+];
+
+var TECIDOS_NOMES = {
+  ess: "Suede · Suede Veludo · Suede Linho · Corano",
+  exe: "Veludo Inca · Pavia · Nobre · Curvin",
+  pre: "Linho Impermeável ✦ · AquaBlock ✦ · Couro Ecol. Kansas · Bouclê · Veludo Maia · Veludo Nobre",
+};
+
+var PRECOS_ORIG = {
+  "Sofá Simples":               {"2 lugares":{ess:"1.500",exe:"1.750",pre:"2.100",novo:"4.500"},"3 lugares":{ess:"1.900",exe:"2.200",pre:"2.600",novo:"5.500"},"4 lugares":{ess:"2.300",exe:"2.650",pre:"3.100",novo:"6.500"},"5 lugares ou +":{ess:"2.700",exe:"3.100",pre:"3.600",novo:"7.500"}},
+  "Sofá Retrátil":              {"2 lugares":{ess:"1.750",exe:"2.050",pre:"2.400",novo:"5.000"},"3 lugares":{ess:"2.300",exe:"2.650",pre:"3.100",novo:"6.500"},"4 lugares":{ess:"2.650",exe:"3.050",pre:"3.550",novo:"8.000"},"5 lugares ou +":{ess:"3.000",exe:"3.450",pre:"4.000",novo:"9.500"}},
+  "Sofá Reclinável":            {"2 lugares":{ess:"1.800",exe:"2.100",pre:"2.500",novo:"5.500"},"3 lugares":{ess:"2.150",exe:"2.500",pre:"2.950",novo:"6.500"},"4 lugares":{ess:"2.500",exe:"2.900",pre:"3.400",novo:"7.500"}},
+  "Sofá Retrátil + Reclinável": {"2 lugares":{ess:"2.100",exe:"2.450",pre:"2.850",novo:"6.000"},"3 lugares":{ess:"2.500",exe:"2.800",pre:"3.300",novo:"7.500"},"4 lugares":{ess:"2.850",exe:"3.250",pre:"3.800",novo:"9.000"},"5 lugares ou +":{ess:"3.200",exe:"3.650",pre:"4.250",novo:"10.500"}},
+  "Sofá de Canto / L":          {"Simples":{ess:"2.500",exe:"2.850",pre:"3.350",novo:"7.000"},"Retrátil":{ess:"2.900",exe:"3.300",pre:"3.850",novo:"8.500"},"Reclinável":{ess:"3.100",exe:"3.550",pre:"4.150",novo:"9.500"},"Modular":{ess:"3.300",exe:"3.800",pre:"4.450",novo:"9.500"}},
+  "Sofá Chaise":                {"2 lugares":{ess:"2.100",exe:"2.450",pre:"2.850",novo:"6.000"},"3 lugares":{ess:"2.500",exe:"2.900",pre:"3.400",novo:"7.000"}},
+  "Sofá Cama":                  {"2 lugares":{ess:"1.800",exe:"2.100",pre:"2.500",novo:"5.000"},"3 lugares":{ess:"2.100",exe:"2.450",pre:"2.850",novo:"6.000"},"Retrátil":{ess:"2.400",exe:"2.800",pre:"3.300",novo:"7.000"}},
+  "Loveseat / Namoradeira":     {"Padrão":{ess:"1.500",exe:"1.750",pre:"2.100",novo:"4.000"}},
+  "Sofá Capitonê":              {"2 lugares":{ess:"1.800",exe:"2.100",pre:"2.500",novo:"5.500"},"3 lugares":{ess:"2.200",exe:"2.550",pre:"3.000",novo:"6.500"},"4 lugares":{ess:"2.600",exe:"3.000",pre:"3.500",novo:"7.500"}},
+  "Sofá Chesterfield":          {"2 lugares":{ess:"2.000",exe:"2.350",pre:"2.750",novo:"6.000"},"3 lugares":{ess:"2.500",exe:"2.900",pre:"3.400",novo:"7.500"}},
+  "Sofá Modular":               {"3 módulos":{ess:"2.400",exe:"2.800",pre:"3.300",novo:"7.000"},"4 módulos":{ess:"3.000",exe:"3.450",pre:"4.000",novo:"9.000"},"5 módulos ou +":{ess:"3.600",exe:"4.100",pre:"4.800",novo:"11.000"}},
+  "Sofá Curvo / Redondo":       {"2-3 lugares":{ess:"2.200",exe:"2.550",pre:"3.000",novo:"6.500"},"4 lugares ou +":{ess:"2.800",exe:"3.200",pre:"3.750",novo:"8.000"}},
+  "Sofá Cama Baú":              {"Solteiro":{ess:"2.100",exe:"2.450",pre:"2.850",novo:"6.000"},"Casal":{ess:"2.400",exe:"2.800",pre:"3.300",novo:"7.000"}},
+  "Sofá Futon":                 {"Solteiro":{ess:"900",exe:"1.050",pre:"1.300",novo:"2.800"},"Casal":{ess:"1.100",exe:"1.300",pre:"1.600",novo:"3.500"}},
+  "Canto Alemão":               {"Pequeno até 2m":{ess:"1.800",exe:"2.100",pre:"2.500",novo:""},"Médio 2 a 3m":{ess:"2.400",exe:"2.800",pre:"3.300",novo:""},"Grande acima 3m":{ess:"3.000",exe:"3.500",pre:"4.100",novo:""}},
+  "Recamier / Chaise Longue":   {"Pequeno até 150cm":{ess:"1.200",exe:"1.400",pre:"1.700",novo:"3.500"},"Médio 151 a 180cm":{ess:"1.500",exe:"1.750",pre:"2.100",novo:"4.500"},"Grande acima 180cm":{ess:"1.800",exe:"2.100",pre:"2.500",novo:"5.500"}},
+  "Poltrona Simples":           {"Até 80cm":{ess:"750",exe:"900",pre:"1.100",novo:"2.500"},"81 a 100cm":{ess:"900",exe:"1.050",pre:"1.300",novo:"3.000"},"Acima 100cm":{ess:"1.050",exe:"1.200",pre:"1.500",novo:"3.500"}},
+  "Poltrona Reclinável":        {"Pequena":{ess:"950",exe:"1.100",pre:"1.350",novo:"3.000"},"Média":{ess:"1.100",exe:"1.300",pre:"1.600",novo:"3.500"},"Grande":{ess:"1.250",exe:"1.450",pre:"1.750",novo:"4.000"}},
+  "Poltrona Cadeirão":          {"Padrão":{ess:"1.050",exe:"1.200",pre:"1.500",novo:"3.500"}},
+  "Poltrona Amamentação":       {"Padrão":{ess:"800",exe:"950",pre:"1.200",novo:"2.500"}},
+  "Charles Eames":              {"Padrão":{ess:"900",exe:"1.050",pre:"1.300",novo:"3.000"}},
+  "Poltrona Decorativa":        {"Pequena":{ess:"700",exe:"850",pre:"1.050",novo:"2.200"},"Média":{ess:"900",exe:"1.050",pre:"1.300",novo:"3.000"},"Grande":{ess:"1.100",exe:"1.300",pre:"1.600",novo:"3.800"}},
+  "Poltrona Giratória":         {"Padrão":{ess:"800",exe:"950",pre:"1.200",novo:"2.800"}},
+  "Poltrona Capitonê":          {"Pequena":{ess:"950",exe:"1.100",pre:"1.350",novo:"3.000"},"Média":{ess:"1.150",exe:"1.350",pre:"1.650",novo:"3.800"},"Grande":{ess:"1.350",exe:"1.600",pre:"1.950",novo:"4.500"}},
+  "Poltrona Bergère":           {"Padrão":{ess:"1.000",exe:"1.200",pre:"1.450",novo:"3.200"}},
+  "Poltrona Lounge / Concha":   {"Padrão":{ess:"1.100",exe:"1.300",pre:"1.600",novo:"3.800"}},
+  "Poltrona Egg / Costela":     {"Padrão":{ess:"1.200",exe:"1.400",pre:"1.700",novo:"4.000"}},
+  "Cabeceira":                  {"Solteiro 88cm":{ess:"600",exe:"720",pre:"900",novo:""},"Casal 138cm":{ess:"680",exe:"820",pre:"1.000",novo:""},"Queen 158cm":{ess:"750",exe:"900",pre:"1.100",novo:""},"King 193cm":{ess:"850",exe:"1.000",pre:"1.250",novo:""},"Capitonê Solteiro":{ess:"750",exe:"900",pre:"1.100",novo:""},"Capitonê Casal":{ess:"850",exe:"1.000",pre:"1.250",novo:""},"Capitonê Queen":{ess:"950",exe:"1.100",pre:"1.350",novo:""},"Capitonê King":{ess:"1.050",exe:"1.250",pre:"1.550",novo:""}},
+  "Painel de Cama Completo":    {"Solteiro":{ess:"900",exe:"1.100",pre:"1.350",novo:""},"Casal":{ess:"1.050",exe:"1.250",pre:"1.550",novo:""},"Queen":{ess:"1.200",exe:"1.400",pre:"1.750",novo:""},"King":{ess:"1.350",exe:"1.600",pre:"2.000",novo:""}},
+  "Banco de Cama (Calçadeira)": {"Solteiro até 90cm":{ess:"550",exe:"680",pre:"850",novo:""},"Casal 140-160cm":{ess:"700",exe:"860",pre:"1.080",novo:""},"Queen / King":{ess:"850",exe:"1.050",pre:"1.300",novo:""}},
+  "Puff":                       {"Pequeno até 50x50":{ess:"320",exe:"400",pre:"520",novo:""},"Médio 51 a 80cm":{ess:"480",exe:"590",pre:"760",novo:""},"Grande 81 a 120cm":{ess:"640",exe:"780",pre:"1.000",novo:""},"Infantil":{ess:"280",exe:"350",pre:"460",novo:""}},
+  "Puff Baú":                   {"Padrão até 120x60":{ess:"850",exe:"1.050",pre:"1.300",novo:""},"Médio 121 a 150cm":{ess:"950",exe:"1.150",pre:"1.450",novo:""},"Grande acima 150cm":{ess:"1.150",exe:"1.400",pre:"1.750",novo:""}},
+  "Puff Capitonê":              {"Pequeno":{ess:"380",exe:"470",pre:"610",novo:""},"Médio":{ess:"520",exe:"640",pre:"830",novo:""},"Grande":{ess:"700",exe:"860",pre:"1.100",novo:""}},
+  "Puff Otomano":               {"Padrão até 100x70":{ess:"750",exe:"920",pre:"1.180",novo:""},"Grande acima 100x70":{ess:"950",exe:"1.150",pre:"1.480",novo:""}},
+  "Puff Gigante / Chão":        {"Padrão":{ess:"600",exe:"740",pre:"950",novo:""}},
+  "Conjunto de Cadeiras":       {"4 cad. (só assento)":{ess:"480",exe:"600",pre:"780",novo:""},"6 cad. (só assento)":{ess:"650",exe:"820",pre:"1.050",novo:""},"8 cad. (só assento)":{ess:"820",exe:"1.020",pre:"1.300",novo:""},"4 cad. (ass+encosto)":{ess:"680",exe:"840",pre:"1.080",novo:""},"6 cad. (ass+encosto)":{ess:"900",exe:"1.100",pre:"1.400",novo:""},"8 cad. (ass+encosto)":{ess:"1.100",exe:"1.350",pre:"1.700",novo:""}},
+  "Cadeira (unitária)":         {"Só assento até 45cm":{ess:"150",exe:"190",pre:"240",novo:""},"Assento+encosto":{ess:"200",exe:"250",pre:"320",novo:""},"Assento maior 46-60cm":{ess:"180",exe:"220",pre:"280",novo:""}},
+  "Cadeira Capitonê":           {"Unitária":{ess:"220",exe:"270",pre:"350",novo:""},"4 unidades":{ess:"780",exe:"960",pre:"1.240",novo:""},"6 unidades":{ess:"1.100",exe:"1.350",pre:"1.740",novo:""}},
+  "Cadeira Luís XV / XVI":      {"Unitária":{ess:"250",exe:"310",pre:"400",novo:""},"4 unidades":{ess:"880",exe:"1.100",pre:"1.420",novo:""},"6 unidades":{ess:"1.250",exe:"1.560",pre:"2.010",novo:""}},
+  "Cadeira Executiva":          {"Unitária":{ess:"280",exe:"350",pre:"450",novo:""},"4 unidades":{ess:"1.000",exe:"1.250",pre:"1.600",novo:""}},
+  "Cadeira Gamer / Escritório": {"Unitária":{ess:"350",exe:"430",pre:"550",novo:""}},
+  "Banco Estofado / Recepção":  {"Pequeno até 120cm":{ess:"650",exe:"800",pre:"1.000",novo:""},"Médio 121 a 180cm":{ess:"900",exe:"1.100",pre:"1.380",novo:""},"Grande acima 180cm":{ess:"1.150",exe:"1.400",pre:"1.750",novo:""}},
+  "Banco Baú / Capitonê":       {"Padrão até 120cm":{ess:"850",exe:"1.050",pre:"1.300",novo:""},"Médio 121 a 160cm":{ess:"1.050",exe:"1.280",pre:"1.600",novo:""}},
+  "Banco Igreja":               {"Por metro linear":{ess:"380",exe:"470",pre:"600",novo:""}},
+  "Banco Bar / Bistrô":         {"Unitário":{ess:"280",exe:"350",pre:"440",novo:""},"4 unidades":{ess:"1.000",exe:"1.240",pre:"1.560",novo:""}},
+  "Banco Automotivo":           {"Banco dianteiro":{ess:"450",exe:"550",pre:"700",novo:""},"Banco traseiro":{ess:"600",exe:"730",pre:"930",novo:""}},
+  "Banco Náutico / Barco":      {"Banco unitário":{ess:"700",exe:"860",pre:"1.100",novo:""},"Por m²":{ess:"550",exe:"680",pre:"870",novo:""}},
+  "Troca de Espuma":            {"Sofá 2 lugares":{ess:"580",exe:"700",pre:"850",novo:""},"Sofá 3 lugares":{ess:"720",exe:"870",pre:"1.050",novo:""},"Sofá retrátil 3L":{ess:"850",exe:"1.020",pre:"1.250",novo:""},"Poltrona":{ess:"380",exe:"460",pre:"560",novo:""},"Cabeceira":{ess:"320",exe:"390",pre:"480",novo:""}},
+  "Capa Sob Medida":            {"Sofá 2 lugares":{ess:"680",exe:"820",pre:"1.000",novo:""},"Sofá 3 lugares":{ess:"820",exe:"990",pre:"1.200",novo:""},"Sofá retrátil 3L":{ess:"980",exe:"1.180",pre:"1.450",novo:""},"Poltrona":{ess:"420",exe:"510",pre:"630",novo:""},"Cabeceira":{ess:"380",exe:"460",pre:"570",novo:""},"Almofada (unit.)":{ess:"95",exe:"120",pre:"150",novo:""}},
+  "Painel / Parede Estofada":   {"Por m² até 3m²":{ess:"380",exe:"470",pre:"600",novo:""},"Por m² acima 3m²":{ess:"320",exe:"400",pre:"510",novo:""}},
+  "Painel Acústico Estofado":   {"Por m² até 3m²":{ess:"420",exe:"520",pre:"660",novo:""},"Por m² acima 3m²":{ess:"360",exe:"450",pre:"570",novo:""}},
+  "B2B — Banco Restaurante":    {"Padrão":{ess:"750",exe:"900",pre:"1.100",novo:""}},
+  "B2B — Booth Restaurante":    {"Por metro linear":{ess:"950",exe:"1.150",pre:"1.450",novo:""}},
+  "B2B — Maca Clínica / SPA":   {"Padrão":{ess:"700",exe:"850",pre:"1.050",novo:""}},
+  "B2B — Divã de Consultório":  {"Padrão":{ess:"1.050",exe:"1.250",pre:"1.550",novo:""}},
+  "B2B — Recepção Corporativa": {"Sofá 2 lugares":{ess:"1.500",exe:"1.750",pre:"2.100",novo:""},"Sofá 3 lugares":{ess:"1.900",exe:"2.200",pre:"2.650",novo:""}},
+  "B2B — Banco Hotel / Pousada":{"Padrão":{ess:"750",exe:"900",pre:"1.100",novo:""}},
+  "B2B — Banco de Academia":    {"Padrão":{ess:"480",exe:"580",pre:"720",novo:""}},
+  "Sofá Garden / Externo":      {"2 lugares":{ess:"1.800",exe:"2.100",pre:"2.500",novo:""},"3 lugares":{ess:"2.200",exe:"2.600",pre:"3.100",novo:""},"Modular 4+":{ess:"2.800",exe:"3.300",pre:"3.900",novo:""}},
+  "Espreguiçadeira":            {"Simples":{ess:"550",exe:"680",pre:"850",novo:""},"Com encosto ajustável":{ess:"700",exe:"860",pre:"1.080",novo:""}},
+  "Cadeira de Balanço":         {"Simples":{ess:"500",exe:"620",pre:"790",novo:""},"Capitonê":{ess:"680",exe:"840",pre:"1.060",novo:""}},
+  "Rede / Balanço Jardim":      {"Unitário":{ess:"350",exe:"440",pre:"560",novo:""}},
+  "Caminha Pet":                {"Pequena até 60cm":{ess:"280",exe:"350",pre:"450",novo:""},"Média 61 a 90cm":{ess:"380",exe:"470",pre:"600",novo:""},"Grande acima 90cm":{ess:"500",exe:"620",pre:"790",novo:""}},
+  "Sofá Pet":                   {"Pequeno":{ess:"350",exe:"430",pre:"550",novo:""},"Médio":{ess:"480",exe:"590",pre:"750",novo:""},"Grande":{ess:"650",exe:"800",pre:"1.000",novo:""}},
+  "Poltrona Salão/Barbearia":   {"Simples":{ess:"700",exe:"850",pre:"1.050",novo:""},"Hidráulica":{ess:"950",exe:"1.150",pre:"1.450",novo:""},"Cadeira Lavatório":{ess:"800",exe:"980",pre:"1.230",novo:""}},
+  "Poltrona Tatoo/Piercing":    {"Padrão":{ess:"850",exe:"1.050",pre:"1.300",novo:""}},
+  "Cadeira Odontológica":       {"Padrão":{ess:"700",exe:"860",pre:"1.080",novo:""}},
+  "Banco de Moto":              {"Simples":{ess:"150",exe:"200",pre:"260",novo:""},"Personalizado":{ess:"280",exe:"350",pre:"450",novo:""},"Com gel/ortopédico":{ess:"380",exe:"470",pre:"600",novo:""}},
+  "Teto Automotivo":            {"Hatch / Sedan":{ess:"450",exe:"560",pre:"720",novo:""},"SUV / Caminhonete":{ess:"650",exe:"800",pre:"1.020",novo:""},"Van / Micro-ônibus":{ess:"950",exe:"1.150",pre:"1.450",novo:""}},
+  "Forro de Porta Automotivo":  {"Por porta":{ess:"180",exe:"230",pre:"300",novo:""},"4 portas":{ess:"650",exe:"800",pre:"1.050",novo:""}},
+  "Capota Marítima / Barco":    {"Pequena até 15 pés":{ess:"850",exe:"1.050",pre:"1.300",novo:""},"Média 16 a 22 pés":{ess:"1.300",exe:"1.600",pre:"2.000",novo:""},"Grande acima 22 pés":{ess:"1.900",exe:"2.350",pre:"2.900",novo:""}},
+  "Limpeza e Higienização":     {"Sofá 2 lugares":{ess:"150",exe:"200",pre:"250",novo:""},"Sofá 3 lugares":{ess:"200",exe:"250",pre:"320",novo:""},"Sofá retrátil 3L":{ess:"250",exe:"320",pre:"400",novo:""},"Poltrona":{ess:"80",exe:"110",pre:"150",novo:""},"Cadeiras (4 un.)":{ess:"120",exe:"160",pre:"200",novo:""},"Colchão":{ess:"150",exe:"200",pre:"260",novo:""}},
+  "Impermeabilização Avulsa":   {"Sofá 2 lugares":{ess:"180",exe:"230",pre:"280",novo:""},"Sofá 3 lugares":{ess:"230",exe:"290",pre:"360",novo:""},"Poltrona":{ess:"100",exe:"130",pre:"170",novo:""},"Conjunto 4 cad.":{ess:"150",exe:"190",pre:"240",novo:""}},
+  "Restauração de Couro":       {"Pequena até 0,5m²":{ess:"280",exe:"350",pre:"450",novo:""},"Média 0,5 a 1m²":{ess:"420",exe:"520",pre:"650",novo:""},"Grande acima 1m²":{ess:"580",exe:"720",pre:"900",novo:""}},
+  "Reparo Pontual / Costura":   {"Pequeno":{ess:"80",exe:"110",pre:"150",novo:""},"Médio":{ess:"150",exe:"200",pre:"260",novo:""},"Grande":{ess:"250",exe:"320",pre:"420",novo:""}},
+  "Reforço de Molas":           {"Sofá 2 lugares":{ess:"350",exe:"440",pre:"560",novo:""},"Sofá 3 lugares":{ess:"480",exe:"600",pre:"760",novo:""},"Poltrona":{ess:"220",exe:"280",pre:"360",novo:""}},
+};
+
+var PRAZOS = {
+  "Sofá Simples":15,"Sofá Retrátil":18,"Sofá Reclinável":18,"Sofá Retrátil + Reclinável":18,
+  "Sofá de Canto / L":20,"Sofá Chaise":18,"Sofá Cama":18,"Loveseat / Namoradeira":15,
+  "Sofá Capitonê":18,"Sofá Chesterfield":18,"Sofá Modular":20,"Sofá Curvo / Redondo":18,
+  "Sofá Cama Baú":18,"Sofá Futon":10,"Canto Alemão":15,"Recamier / Chaise Longue":15,
+  "Poltrona Simples":10,"Poltrona Reclinável":15,"Poltrona Cadeirão":10,"Poltrona Amamentação":10,
+  "Charles Eames":10,"Poltrona Decorativa":10,"Poltrona Giratória":10,"Poltrona Capitonê":15,
+  "Poltrona Bergère":15,"Poltrona Lounge / Concha":15,"Poltrona Egg / Costela":15,
+  "Cabeceira":10,"Painel de Cama Completo":15,"Banco de Cama (Calçadeira)":10,
+  "Puff":8,"Puff Baú":10,"Puff Capitonê":8,"Puff Otomano":10,"Puff Gigante / Chão":8,
+  "Conjunto de Cadeiras":8,"Cadeira (unitária)":5,"Cadeira Capitonê":8,"Cadeira Luís XV / XVI":8,
+  "Cadeira Executiva":5,"Cadeira Gamer / Escritório":5,
+  "Banco Estofado / Recepção":10,"Banco Baú / Capitonê":10,"Banco Igreja":15,
+  "Banco Bar / Bistrô":8,"Banco Automotivo":8,"Banco Náutico / Barco":10,
+  "Troca de Espuma":5,"Capa Sob Medida":8,
+  "Painel / Parede Estofada":15,"Painel Acústico Estofado":15,
+  "B2B — Banco Restaurante":10,"B2B — Booth Restaurante":15,"B2B — Maca Clínica / SPA":10,
+  "B2B — Divã de Consultório":15,"B2B — Recepção Corporativa":18,
+  "B2B — Banco Hotel / Pousada":10,"B2B — Banco de Academia":8,
+  "Sofá Garden / Externo":15,"Espreguiçadeira":8,"Cadeira de Balanço":8,"Rede / Balanço Jardim":5,
+  "Caminha Pet":5,"Sofá Pet":7,
+  "Poltrona Salão/Barbearia":8,"Poltrona Tatoo/Piercing":8,"Cadeira Odontológica":10,
+  "Banco de Moto":3,"Teto Automotivo":5,"Forro de Porta Automotivo":4,"Capota Marítima / Barco":12,
+  "Limpeza e Higienização":1,"Impermeabilização Avulsa":1,"Restauração de Couro":8,
+  "Reparo Pontual / Costura":3,"Reforço de Molas":5,
+};
+
+var OBJECOES = [
+  {obj:"Está muito caro",resp:"Entendo! 😊 Vou te mostrar o que está incluso:\n✅ Simulação visual gratuita\n✅ Espuma nova (D-23 a D-33 conforme plano)\n✅ Tecido premium ou impermeável de fábrica\n✅ Coleta e entrega\n✅ Garantia de 12 meses por escrito\n\nUm sofá novo igual ao seu custa muito mais em Salvador. Com a reforma você renova por muito menos! 💡"},
+  {obj:"Vou pensar e te aviso",resp:"Claro! 😊 Nossa agenda tem disponibilidade limitada esta semana.\n\nVou reservar sua vaga por 48h — se não confirmar, libero para outro cliente, tudo bem? 📅\n\nAlguma dúvida que posso esclarecer agora? 🤝"},
+  {obj:"Achei mais barato em outro lugar",resp:"Posso perguntar o que está incluso nesse orçamento? 😊\n\nMuitas vezes o preço baixo não inclui:\n❌ Espuma nova\n❌ Garantia por escrito\n❌ Simulação visual antes\n❌ Coleta e entrega\n\nNa BS Móveis o preço é completo — sem surpresas! 🛡"},
+  {obj:"Não tenho dinheiro agora",resp:"Sem problema! 😊\nTemos parcelamento em até *10x no cartão*.\n\nAssim você renova hoje e paga com calma! 💳"},
+  {obj:"Deixa para o próximo mês",resp:"Entendo! 😊 Nossa agenda do próximo mês já está começando a fechar.\n\nPosso reservar com *50% de entrada* e você paga o restante na entrega. O que acha? 📅"},
+  {obj:"Tenho medo de não ficar bom",resp:"Por isso temos nosso diferencial exclusivo: 📱\n\n*Mostramos como vai ficar ANTES de começar!*\n\nVocê aprova o resultado antes de qualquer trabalho. Sem risco! 😊"},
+  {obj:"Prefiro comprar um sofá novo",resp:"Faz sentido! Mas veja: 💡\n\nCom a reforma você tem o dobro de vida útil, escolhe o tecido e a cor, e paga muito menos. E ainda vê o resultado antes! Qual faz mais sentido? 😊"},
+  {obj:"Não tenho tempo para esperar",resp:"Nosso prazo é rápido e a coleta/entrega são por nossa conta — você não se desloca! Agendamos no horário mais conveniente. ⏱ 😊"},
+  {obj:"Preciso falar com meu/minha cônjuge",resp:"Decisão em família é sempre melhor! 😊\n\nPosso mandar a proposta no WhatsApp para vocês analisarem juntos. Ou agendar visita com mostruário! 🎨"},
+  {obj:"Não conheço a empresa",resp:"Somos especializados em Salvador e Lauro de Freitas! 😊\n\n✅ Simulação visual gratuita\n✅ Tecidos impermeáveis de fábrica\n✅ Garantia 12 meses por escrito\n✅ Espuma D-33 no Premium\n\nPosso te mostrar avaliações e fotos de trabalhos! 📸"},
+];
+
+var MSGS_FOLLOWUP = {
+  contato:    {titulo:"💬 Script — Primeiro contato",proximo:"Enviar simulação",msg:function(n){return "Oi, *"+n+"*! Tudo bem? 😊\n\nAqui é da *BS Móveis Estofados*!\n\nRecebi seu contato e adoraria te ajudar a renovar seu estofado.\n\nPosso te enviar uma simulação de como vai ficar o resultado antes de começar? É gratuito! 📱\n\n_Equipe BS Móveis Estofados_";}},
+  simulacao:  {titulo:"📱 Script — Após simulação",proximo:"Enviar orçamento",msg:function(n){return "Oi, *"+n+"*! 😊\n\nEspero que tenha gostado da simulação!\n\nPreparei um orçamento completo com *3 opções de planos* para você escolher o que melhor encaixa no seu bolso.\n\nPosso te enviar agora? 📋\n\n_Equipe BS Móveis Estofados_";}},
+  orcamento:  {titulo:"📋 Script — Após orçamento",proximo:"Iniciar negociação",msg:function(n){return "Oi, *"+n+"*! 😊\n\nEnviei o orçamento há alguns dias e queria saber se ficou alguma dúvida!\n\nTenho *parcelamento em até 10x no cartão* e posso agendar uma visita com mostruário de tecidos até você. 🎨\n\nQual opção de plano chamou mais sua atenção?\n\n_Equipe BS Móveis Estofados_";}},
+  negociacao: {titulo:"🤝 Script — Em negociação",proximo:"Fechar pedido",msg:function(n){return "Oi, *"+n+"*! 😊\n\nPasso para confirmar se chegamos a um acordo!\n\nNossa agenda desta semana está quase cheia — posso *reservar sua vaga* hoje para garantir o prazo. 📅\n\nO que acha de fecharmos agora?\n\n_Equipe BS Móveis Estofados_";}},
+  fechado:    {titulo:"✅ Script — Pedido fechado",proximo:"Agendar coleta",msg:function(n){return "Oi, *"+n+"*! 🎉\n\nMuito obrigado pela confiança!\n\nVamos agendar a *coleta do seu estofado*? Me fala qual o melhor dia e horário para nossa equipe ir até você. 🚗\n\n_Equipe BS Móveis Estofados_";}},
+  entregue:   {titulo:"🚚 Script — Após entrega",proximo:"Ativar pós-venda",msg:function(n){return "Oi, *"+n+"*! 😊\n\nEspero que esteja amando o resultado da reforma!\n\nLembrando que você tem *garantia de 12 meses* conosco. Qualquer dúvida, é só chamar! 🛡\n\nSe puder, nos deixe uma avaliação no Google — ajuda muito! ⭐\n\n_Equipe BS Móveis Estofados_";}},
+  posvenda:   {titulo:"⭐ Script — Pós-venda ativo",proximo:"Solicitar indicação",msg:function(n){return "Oi, *"+n+"*! 😊\n\nFaz um tempo desde que entregamos sua reforma e queria saber: *está tudo perfeito?*\n\nSe tiver algum amigo ou familiar que precise reformar estofados, me indica! Cada indicação que fechar tem *desconto especial* na sua próxima reforma. 🎁\n\n_Equipe BS Móveis Estofados_";}},
+};
+
+var MSGS_PRODUCAO = {
+  aguardando: {emoji:"⏳", msg:function(n){return "Oi, *"+n+"*! 😊\n\nSeu estofado *entrou na nossa fila de produção*!\n\nEm breve nossa equipe vai começar a reforma. Te avisamos cada etapa! 🛋️\n\n_Equipe BS Móveis Estofados_";}},
+  desmontado: {emoji:"🔧", msg:function(n){return "Oi, *"+n+"*! 😊\n\nSua reforma *começou*! 🎉\n\nEstamos desmontando seu estofado com cuidado para preparar tudo para o novo revestimento.\n\n_Equipe BS Móveis Estofados_";}},
+  em_tecido:  {emoji:"🧵", msg:function(n){return "Oi, *"+n+"*! 😊\n\nNova atualização da sua reforma! 🧵\n\nJá estamos *aplicando o novo tecido* no seu estofado. Está ficando lindo!\n\n_Equipe BS Móveis Estofados_";}},
+  acabamento: {emoji:"✂️", msg:function(n){return "Oi, *"+n+"*! 😊\n\nQuase pronto! ✂️\n\nEstamos na fase de *acabamento final* — costuras, ajustes e revisão de qualidade do seu estofado.\n\n_Equipe BS Móveis Estofados_";}},
+  pronto:     {emoji:"🎉", msg:function(n){return "Oi, *"+n+"*! 🎉\n\nSua reforma está *PRONTA*! ✅\n\nFicou incrível! Vamos agendar a entrega?\n\n_Equipe BS Móveis Estofados_";}},
+};
+
+var SCRIPTS_POS = [
+  {label:"30 dias após entrega",texto:"Oi [NOME]! Tudo bem? 😊\nFaz um mês que entregamos seu [SERVICO] e queria saber:\nEstá tudo perfeito? O resultado está como esperava?\n\nLembrando que você tem *garantia de 12 meses* conosco! 🛡"},
+  {label:"Pedido de indicação",texto:"[NOME], que ótimo saber que está satisfeito! 😊\nSe você tiver algum amigo ou familiar que precise reformar estofados, adoraria ajudá-los!\n\n*Cada indicação que fechar você ganha desconto na próxima reforma!* 🎁"},
+  {label:"6 meses — recompra",texto:"Oi [NOME]! 😊\nComo está seu [SERVICO] que reformamos?\nJá faz 6 meses! Clientes antigos têm *condição especial*. Posso preparar uma proposta? 😊"},
+  {label:"1 ano — aniversário",texto:"[NOME], faz exatamente 1 ano que reformamos seu [SERVICO]! 🎉\nEspero que continue amando o resultado!\n\nComo presente, tenho uma *oferta exclusiva* para você na próxima reforma. Quer saber? 😊"},
+  {label:"Avaliação Google",texto:"Oi [NOME]! 😊\nFicamos muito felizes com o resultado!\n\nSe puder nos dar *uma avaliação no Google* 5 estrelas, ficamos muito gratos! ⭐\n👉 [link do Google aqui]"},
+];
+
+var TIPOS = Object.keys(PRECOS_ORIG);
+
+var CATEGORIAS = [
+  {id:"sofas",     label:"🛋️ Sofás",           cor:"#1565C0",bg:"#E3F2FD",tipos:["Sofá Simples","Sofá Retrátil","Sofá Reclinável","Sofá Retrátil + Reclinável","Sofá de Canto / L","Sofá Chaise","Sofá Cama","Sofá Cama Baú","Loveseat / Namoradeira","Sofá Capitonê","Sofá Chesterfield","Sofá Modular","Sofá Curvo / Redondo","Sofá Futon","Canto Alemão"]},
+  {id:"poltronas", label:"💺 Poltronas",         cor:"#6A1B9A",bg:"#F3E5F5",tipos:["Poltrona Simples","Poltrona Reclinável","Poltrona Cadeirão","Poltrona Amamentação","Charles Eames","Poltrona Decorativa","Poltrona Giratória","Poltrona Capitonê","Poltrona Bergère","Poltrona Lounge / Concha","Poltrona Egg / Costela","Recamier / Chaise Longue","Cadeira de Balanço","Espreguiçadeira"]},
+  {id:"dormitorio",label:"🛏️ Dormitório",       cor:"#004D40",bg:"#E0F2F1",tipos:["Cabeceira","Painel de Cama Completo","Banco de Cama (Calçadeira)"]},
+  {id:"puffs",     label:"🪑 Puffs",             cor:"#E65100",bg:"#FFF3E0",tipos:["Puff","Puff Baú","Puff Capitonê","Puff Otomano","Puff Gigante / Chão"]},
+  {id:"cadeiras",  label:"🪑 Cadeiras",          cor:"#37474F",bg:"#ECEFF1",tipos:["Conjunto de Cadeiras","Cadeira (unitária)","Cadeira Capitonê","Cadeira Luís XV / XVI","Cadeira Executiva","Cadeira Gamer / Escritório","Cadeira Odontológica"]},
+  {id:"bancos",    label:"🏛️ Bancos",            cor:"#1B5E20",bg:"#E8F5E9",tipos:["Banco Estofado / Recepção","Banco Baú / Capitonê","Banco Igreja","Banco Bar / Bistrô","Banco Automotivo","Banco Náutico / Barco","Banco de Moto"]},
+  {id:"garden",    label:"🌿 Garden & Pet",      cor:"#2E7D32",bg:"#F1F8E9",tipos:["Sofá Garden / Externo","Espreguiçadeira","Rede / Balanço Jardim","Caminha Pet","Sofá Pet"]},
+  {id:"autonauta", label:"🚗 Auto & Náutico",    cor:"#1A237E",bg:"#E8EAF6",tipos:["Banco de Moto","Teto Automotivo","Forro de Porta Automotivo","Banco Automotivo","Banco Náutico / Barco","Capota Marítima / Barco"]},
+  {id:"saude",     label:"💈 Salão & Saúde",     cor:"#880E4F",bg:"#FCE4EC",tipos:["Poltrona Salão/Barbearia","Poltrona Tatoo/Piercing","Cadeira Odontológica","B2B — Maca Clínica / SPA","B2B — Divã de Consultório"]},
+  {id:"especiais", label:"🔧 Serviços Especiais",cor:"#F57F17",bg:"#FFFDE7",tipos:["Troca de Espuma","Capa Sob Medida","Painel / Parede Estofada","Painel Acústico Estofado","Reforço de Molas","Reparo Pontual / Costura"]},
+  {id:"b2b",       label:"🏢 B2B / Comercial",   cor:"#B71C1C",bg:"#FFEBEE",tipos:["B2B — Banco Restaurante","B2B — Booth Restaurante","B2B — Maca Clínica / SPA","B2B — Divã de Consultório","B2B — Recepção Corporativa","B2B — Banco Hotel / Pousada","B2B — Banco de Academia","Poltrona Salão/Barbearia"]},
+];
+
+/* ════════════════════════════════════════════════
+   HELPERS
+════════════════════════════════════════════════ */
+function toN(v){return parseFloat(String(v||"0").replace(/\./g,"").replace(",","."))||0;}
+function fBR(n){return n.toLocaleString("pt-BR",{minimumFractionDigits:2,maximumFractionDigits:2});}
+function parc(n){return fBR(n/0.8/10);}
+function hoje(){return new Date().toLocaleDateString("pt-BR");}
+function agora(){return new Date().toLocaleTimeString("pt-BR",{hour:"2-digit",minute:"2-digit"});}
+function mesAtual(){var d=new Date();return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0");}
+function novoItem(){return {id:Math.random(),tipo:TIPOS[0],variante:Object.keys(PRECOS_ORIG[TIPOS[0]])[0],overEss:"",overExe:"",overPre:""};}
+function nomeExib(c){return c.nome||c.telefone||"Cliente";}
+function prNome(c){return c.nome?c.nome.split(" ")[0]:(c.telefone||"Cliente");}
+function etapaInfo(id){return ETAPAS.find(function(e){return e.id===id;})||ETAPAS[0];}
+function sprodInfo(id){return SPRODS.find(function(s){return s.id===id;})||SPRODS[0];}
+function diasSemContato(c){if(!c.dataUltimoContato)return 999;return Math.floor((Date.now()-new Date(c.dataUltimoContato).getTime())/86400000);}
+function diasParaEntrega(c){if(!c.dataEntrega)return null;return Math.ceil((new Date(c.dataEntrega+"T23:59:59").getTime()-Date.now())/86400000);}
+function prazoInfo(dias){if(dias===null)return null;if(dias<0)return{label:"⚠️ "+Math.abs(dias)+"d atrasado",cor:"#C62828",bg:"#FFEBEE"};if(dias===0)return{label:"🚨 Entrega hoje!",cor:"#C62828",bg:"#FFEBEE"};if(dias<=2)return{label:"🔴 "+dias+"d para entrega",cor:"#C62828",bg:"#FFEBEE"};if(dias<=5)return{label:"🟡 "+dias+"d para entrega",cor:"#F57F17",bg:"#FFF8E7"};return{label:"🟢 "+dias+"d para entrega",cor:"#1B5E20",bg:"#E8F5E9"};}
+function novoCliente(nome,tel,vendedor){return{id:Math.random(),nome:(nome||"").trim(),telefone:(tel||"").trim(),vendedor:vendedor||"",etapa:"contato",itens:[novoItem()],obs:[],criadoEm:new Date().toISOString(),atualizadoEm:new Date().toISOString(),dataUltimoContato:new Date().toISOString(),dataColeta:"",dataEntrega:"",statusProducao:"aguardando",fotosAntes:[],fotosDepois:[],entradaPaga:"0",saldoPago:"0",planoEscolhido:"",desconto:"0",custoTecido:"0",custoEspuma:"0",custoMaoObra:"0",notaSatisfacao:null,indicouCliente:false,tecidoEscolhido:"",corEscolhida:"",codigoRastreio:String(Math.floor(100000+Math.random()*900000)),indicadoPor:"",};}
+function gerarCodigoCliente(c){if(!c)return "";var cod=String(c.codigoRastreio||"").trim();if(cod.length===6)return cod;var str=String(c.id||"").replace("0.","").replace(".","").slice(-8);return String((parseInt(str)||0)%900000+100000);}
+function catDeTipo(tipo){return CATEGORIAS.find(function(c){return c.tipos.indexOf(tipo)!==-1;})||CATEGORIAS[0];}
+
+function gerarMensagem(itens,precos,nomeCliente,emp){
+  var e=emp||{nome:"BS Móveis Estofados",whatsapp:"5571985039240",cidade:"Salvador e Lauro de Freitas",saudacao:"Aqui é da *BS Móveis Estofados* e preparei"};
+  if(!itens||itens.length===0)return "";
+  var te=0,tx=0,tp=0;
+  itens.forEach(function(it){var p=precos[it.tipo]&&precos[it.tipo][it.variante];if(p){te+=toN(it.overEss||p.ess);tx+=toN(it.overExe||p.exe);tp+=toN(it.overPre||p.pre);}});
+  var prazos=itens.map(function(it){return PRAZOS[it.tipo]||15;});
+  var maxP=Math.max.apply(null,prazos),minP=Math.min.apply(null,prazos);
+  var prazoStr=minP===maxP?(minP+" dias úteis"):(minP+" a "+maxP+" dias úteis");
+  var lista=itens.map(function(it,i){
+    var p=precos[it.tipo]&&precos[it.tipo][it.variante];
+    var v=(it.variante&&it.variante!=="Padrão")?" — "+it.variante:"";
+    var novoLine=(p&&p.novo)?"\n   🆚 Sofá novo custaria: R$ "+p.novo:"";
+    var essVal=it.overEss||(p?p.ess:"—");var exeVal=it.overExe||(p?p.exe:"—");var preVal=it.overPre||(p?p.pre:"—");
+    return "📌 "+(i+1)+". *"+it.tipo+v+"*\n   🔵 R$ "+essVal+"  ⭐ R$ "+exeVal+"  💎 R$ "+preVal+novoLine;
+  }).join("\n");
+  var saud=nomeCliente?("Oi, *"+nomeCliente+"*! Tudo bem? 😊"):"Oi! Tudo bem? 😊";
+  return [saud,"",e.saudacao,"sua proposta completa de reforma! 🛋️","","─────────────────────","📋 *ITENS DO ORÇAMENTO:*","─────────────────────",lista,"","─────────────────────","✅ *INCLUSO EM TODOS OS PLANOS:*","─────────────────────","✔ Desmontagem e remontagem completa","✔ Revestimento total de cada peça","✔ Acabamento profissional","✔ Coleta e entrega em "+e.cidade,"","─────────────────────","🔵 *PLANO ESSENCIAL — R$ "+fBR(te)+"*","─────────────────────","🎨 Tecidos:",TECIDOS_NOMES.ess,"🛏 Espuma D-23 inclusa","💰 À vista: R$ "+fBR(te),"💳 10x de R$ "+parc(te),"","─────────────────────","⭐ *PLANO EXECUTIVO — R$ "+fBR(tx)+"*","★ MAIS ESCOLHIDO ★","─────────────────────","🎨 Tecidos:",TECIDOS_NOMES.exe,"🛏 Espuma D-28 inclusa","💰 À vista: R$ "+fBR(tx),"💳 10x de R$ "+parc(tx),"","─────────────────────","💎 *PLANO PREMIUM — R$ "+fBR(tp)+"*","─────────────────────","🎨 Tecidos:",TECIDOS_NOMES.pre,"✦ Linho Impermeável e AquaBlock — impermeáveis de fábrica!","🛏 Espuma D-33 (alta densidade) inclusa","💰 À vista: R$ "+fBR(tp),"💳 10x de R$ "+parc(tp),"","─────────────────────","⏱ *PRAZO:* "+prazoStr,"🛡 *GARANTIA:* 12 meses","🎨 *MOSTRUÁRIO:* levamos até você","📱 *SIMULAÇÃO:* antes de começar","─────────────────────","","Qual opção faz mais sentido para você? 😊"].join("\n");
+}
+
+/* ════════════════════════════════════════════════
+   TELA SENHA
+════════════════════════════════════════════════ */
+function TelaSenha({onOk}) {
+  const [senha,setSenha]=useState("");
+  const [erro,setErro]=useState(false);
+  const SENHA_CORRETA="bsmoveis2025";
+  function verificar(){if(senha===SENHA_CORRETA){onOk();}else{setErro(true);setSenha("");setTimeout(()=>setErro(false),2500);}}
+  return (
+    <div style={{fontFamily:"Arial,sans-serif",background:"linear-gradient(135deg,#1A3A5C,#2A5280)",minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",padding:"16px"}}>
+      <div style={{background:"#FFF",borderRadius:"22px",padding:"40px 28px",maxWidth:"380px",width:"100%",boxShadow:"0 24px 64px rgba(0,0,0,0.28)",textAlign:"center"}}>
+        <div style={{display:"flex",justifyContent:"center",marginBottom:"12px"}}><LogoBS size={64}/></div>
+        <div style={{fontWeight:"900",fontSize:"21px",color:"#1A3A5C",marginBottom:"4px"}}>BS MÓVEIS ESTOFADOS</div>
+        <div style={{fontSize:"11px",color:"#C8A84B",fontWeight:"800",marginBottom:"28px",textTransform:"uppercase",letterSpacing:"2px"}}>Acesso Restrito</div>
+        <p style={{fontSize:"14px",color:"#6B7A8D",marginBottom:"14px"}}>Digite a senha de acesso</p>
+        <input type="password" value={senha} onChange={e=>setSenha(e.target.value)} onKeyDown={e=>e.key==="Enter"&&verificar()} placeholder="Senha..." autoFocus
+          style={{width:"100%",padding:"13px",borderRadius:"12px",border:erro?"2px solid #C62828":"1.5px solid #DDD",fontSize:"15px",outline:"none",boxSizing:"border-box",textAlign:"center",marginBottom:"8px",background:erro?"#FFEBEE":"#FFF"}}/>
+        {erro&&<p style={{color:"#C62828",fontSize:"13px",fontWeight:"bold",marginBottom:"8px"}}>❌ Senha incorreta. Tente novamente.</p>}
+        <button onClick={verificar} style={{width:"100%",padding:"14px",borderRadius:"14px",border:"none",background:senha.trim()?"#1A3A5C":"#CCC",color:"#FFF",fontWeight:"bold",fontSize:"15px",cursor:senha.trim()?"pointer":"default",marginTop:"4px"}}>Entrar →</button>
+        <p style={{fontSize:"11px",color:"#BBB",marginTop:"18px"}}>Senha padrão: <strong>bsmoveis2025</strong></p>
+        <p style={{fontSize:"10px",color:"#CCC",marginTop:"6px"}}>Altere no código antes de publicar</p>
+      </div>
+    </div>
+  );
+}
+
+/* ════════════════════════════════════════════════
+   TELA LOGIN
+════════════════════════════════════════════════ */
+function TelaLogin({onLogin}) {
+  const [nome,setNome]=useState("");
+  return (
+    <div style={{fontFamily:"Arial,sans-serif",background:"linear-gradient(135deg,#1A3A5C,#2A5280)",minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",padding:"16px"}}>
+      <div style={{background:"#FFF",borderRadius:"22px",padding:"40px 28px",maxWidth:"380px",width:"100%",boxShadow:"0 24px 64px rgba(0,0,0,0.28)",textAlign:"center"}}>
+        <div style={{display:"flex",justifyContent:"center",marginBottom:"12px"}}><LogoBS size={64}/></div>
+        <div style={{fontWeight:"900",fontSize:"21px",color:"#1A3A5C",marginBottom:"4px"}}>GRUPO BS MÓVEIS</div>
+        <div style={{fontSize:"11px",color:"#C8A84B",fontWeight:"800",marginBottom:"28px",textTransform:"uppercase",letterSpacing:"2px"}}>Sistema Completo de Vendas</div>
+        <p style={{fontSize:"14px",color:"#6B7A8D",marginBottom:"14px"}}>Como você quer se identificar?</p>
+        <input value={nome} onChange={e=>setNome(e.target.value)} onKeyDown={e=>e.key==="Enter"&&nome.trim()&&onLogin(nome.trim())} placeholder="Seu nome (ex: João, Maria...)" autoFocus
+          style={{width:"100%",padding:"13px",borderRadius:"12px",border:"1.5px solid #DDD",fontSize:"15px",outline:"none",boxSizing:"border-box",textAlign:"center",marginBottom:"12px"}}/>
+        <button onClick={()=>nome.trim()&&onLogin(nome.trim())} style={{width:"100%",padding:"14px",borderRadius:"14px",border:"none",background:nome.trim()?"#1A3A5C":"#CCC",color:"#FFF",fontWeight:"bold",fontSize:"15px",cursor:nome.trim()?"pointer":"default"}}>Entrar no Sistema →</button>
+        <p style={{fontSize:"11px",color:"#BBB",marginTop:"18px"}}>Dados salvos localmente neste dispositivo.</p>
+      </div>
+    </div>
+  );
+}
+
+/* ════════════════════════════════════════════════
+   ITEM CARD
+════════════════════════════════════════════════ */
+function ItemCard({item,idx,total,precos,onUpdate,onRemove}) {
+  const p=precos[item.tipo]&&precos[item.tipo][item.variante];
+  const [catSel,setCatSel]=useState(()=>catDeTipo(item.tipo).id);
+  const cat=CATEGORIAS.find(c=>c.id===catSel)||CATEGORIAS[0];
+  const tiposDaCat=cat.tipos.filter(t=>!!precos[t]);
+  const vars=Object.keys(precos[item.tipo]||{});
+  function handleCat(cid){setCatSel(cid);const nc=CATEGORIAS.find(c=>c.id===cid);if(nc&&nc.tipos.length>0&&precos[nc.tipos[0]])onUpdate(item.id,"tipo",nc.tipos[0]);}
+  const PLANOS=[
+    {label:"🔵 Essencial",field:"overEss",def:p?p.ess:"",cor:"#37474F",bg:"#ECEFF1",borda:"#90A4AE"},
+    {label:"⭐ Executivo", field:"overExe",def:p?p.exe:"",cor:"#1565C0",bg:"#E3F2FD",borda:"#90CAF9"},
+    {label:"💎 Premium",   field:"overPre",def:p?p.pre:"",cor:"#6A1B9A",bg:"#F3E5F5",borda:"#CE93D8"},
+  ];
+  return (
+    <div style={{background:idx%2===0?"#F7F9FF":"#FAFBFF",borderRadius:"14px",padding:"14px",marginBottom:"12px",border:"1.5px solid rgba(26,58,92,0.10)"}}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:"12px"}}>
+        <span style={{background:"#1A3A5C",color:"#FFF",borderRadius:"20px",padding:"3px 14px",fontSize:"11px",fontWeight:"bold"}}>Item {idx+1}</span>
+        {total>1&&<button onClick={()=>onRemove(item.id)} style={{background:"#FFEBEE",border:"none",color:"#C62828",borderRadius:"8px",padding:"4px 10px",cursor:"pointer",fontSize:"12px",fontWeight:"bold"}}>✕ Remover</button>}
+      </div>
+      <div style={{marginBottom:"10px"}}>
+        <div style={{fontSize:"10px",fontWeight:"bold",color:"#6B7A8D",marginBottom:"7px",textTransform:"uppercase"}}>① Categoria</div>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"6px"}}>
+          {CATEGORIAS.map(c=>{const ativa=catSel===c.id;return(
+            <button key={c.id} onClick={()=>handleCat(c.id)} style={{padding:"8px 6px",borderRadius:"10px",border:"2px solid "+(ativa?c.cor:"transparent"),background:ativa?c.bg:"#F0F4FA",color:ativa?c.cor:"#6B7A8D",fontWeight:ativa?"bold":"600",fontSize:"11px",cursor:"pointer",textAlign:"left",lineHeight:"1.3"}}>{c.label}</button>
+          );})}
+        </div>
+      </div>
+      <div style={{marginBottom:"10px"}}>
+        <div style={{fontSize:"10px",fontWeight:"bold",color:"#6B7A8D",marginBottom:"5px",textTransform:"uppercase"}}>② Serviço</div>
+        <select value={item.tipo} onChange={e=>onUpdate(item.id,"tipo",e.target.value)} style={{width:"100%",padding:"10px 12px",borderRadius:"9px",border:"2px solid "+cat.cor,fontSize:"13px",outline:"none",background:cat.bg,boxSizing:"border-box",fontWeight:"bold",color:cat.cor}}>
+          {tiposDaCat.map(t=><option key={t} value={t}>{t}</option>)}
+        </select>
+      </div>
+      {vars.length>1&&<div style={{marginBottom:"12px"}}>
+        <div style={{fontSize:"10px",fontWeight:"bold",color:"#6B7A8D",marginBottom:"5px",textTransform:"uppercase"}}>③ Tamanho / Variante</div>
+        <select value={item.variante} onChange={e=>onUpdate(item.id,"variante",e.target.value)} style={{width:"100%",padding:"10px 12px",borderRadius:"9px",border:"1.5px solid rgba(26,58,92,0.12)",fontSize:"13px",outline:"none",background:"#F7F9FC",boxSizing:"border-box"}}>
+          {vars.map(v=><option key={v} value={v}>{v}</option>)}
+        </select>
+      </div>}
+      {vars.length===1&&<div style={{marginBottom:"12px",fontSize:"12px",color:"#6B7A8D",background:"#F7F9FC",borderRadius:"8px",padding:"8px 12px"}}>📐 Variante: <strong>{vars[0]}</strong></div>}
+      <div style={{background:"#FAFBFF",borderRadius:"10px",padding:"10px",border:"1.5px solid rgba(26,58,92,0.08)"}}>
+        <div style={{fontSize:"10px",fontWeight:"bold",color:"#6B7A8D",marginBottom:"8px",textTransform:"uppercase"}}>④ Preços</div>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:"8px"}}>
+          {PLANOS.map(pl=>{const cur=item[pl.field]!==""&&item[pl.field]!==undefined?item[pl.field]:pl.def;const editado=item[pl.field]!==""&&item[pl.field]!==undefined&&item[pl.field]!==pl.def;return(
+            <div key={pl.field}>
+              <div style={{fontSize:"10px",fontWeight:"bold",color:pl.cor,marginBottom:"4px",textAlign:"center"}}>{pl.label}</div>
+              <input value={cur} placeholder={pl.def} onChange={e=>onUpdate(item.id,pl.field,e.target.value.replace(/[^0-9.,]/g,""))} style={{width:"100%",padding:"9px 4px",borderRadius:"8px",border:"1.5px solid "+(editado?pl.borda:"rgba(26,58,92,0.12)"),fontSize:"14px",fontWeight:"bold",color:pl.cor,outline:"none",background:editado?pl.bg:"#FFF",boxSizing:"border-box",textAlign:"center"}}/>
+              {editado&&<div style={{fontSize:"9px",color:pl.cor,textAlign:"center",marginTop:"2px"}}>Padrão: {pl.def}</div>}
+            </div>
+          );})}
+        </div>
+        <button onClick={()=>{onUpdate(item.id,"overEss","");onUpdate(item.id,"overExe","");onUpdate(item.id,"overPre","");}} style={{width:"100%",marginTop:"8px",padding:"6px",borderRadius:"7px",border:"1.5px dashed #DDD",background:"transparent",color:"#AAA",fontSize:"10px",fontWeight:"bold",cursor:"pointer"}}>↩️ Restaurar preços padrão</button>
+      </div>
+      {p&&p.novo&&<div style={{marginTop:"8px",fontSize:"11px",color:"#6A1B9A",textAlign:"center",background:"#F3E5F5",borderRadius:"8px",padding:"5px 10px",fontWeight:"600"}}>🆚 Sofá novo equivalente: <strong>R$ {p.novo}</strong></div>}
+    </div>
+  );
+}
+
+/* ════════════════════════════════════════════════
+   CLIENTE DETALHE
+════════════════════════════════════════════════ */
+function ClienteDetalhe({cliente,user,precos,empresa,onUpdate,onBack,onDelete}) {
+  const [subAba,setSubAba]=useState("itens");
+  const [pendingEtapa,setPendingEtapa]=useState(null);
+  const [novaObs,setNovaObs]=useState("");
+  const [copiado,setCopiado]=useState(false);
+  const [orcSalvo,setOrcSalvo]=useState(false);
+  const [draftItens,setDraftItens]=useState(cliente.itens||[]);
+  const [temAlter,setTemAlter]=useState(false);
+  const [urlFotoInput,setUrlFotoInput]=useState({antes:"",depois:""});
+  const txtRef=useRef(null);
+
+  useEffect(()=>{setDraftItens(cliente.itens||[]);setTemAlter(false);},[cliente.id]);
+
+  const itens=draftItens;
+  const totalEss=itens.reduce((s,it)=>{const p=precos[it.tipo]&&precos[it.tipo][it.variante];return s+(p?toN(p.ess):0);},0);
+  const totalExe=itens.reduce((s,it)=>{const p=precos[it.tipo]&&precos[it.tipo][it.variante];return s+(p?toN(p.exe):0);},0);
+  const totalPre=itens.reduce((s,it)=>{const p=precos[it.tipo]&&precos[it.tipo][it.variante];return s+(p?toN(p.pre):0);},0);
+  const planoValBruto=cliente.planoEscolhido==="ess"?totalEss:cliente.planoEscolhido==="pre"?totalPre:totalExe;
+  const desconto=toN(cliente.desconto),planoVal=Math.max(0,planoValBruto-desconto);
+  const recebido=toN(cliente.entradaPaga)+toN(cliente.saldoPago),saldoDev=Math.max(0,planoVal-recebido);
+  const custTotal=toN(cliente.custoTecido)+toN(cliente.custoEspuma)+toN(cliente.custoMaoObra);
+  const margem=planoVal>0?((planoVal-custTotal)/planoVal*100):0;
+  const ei=etapaInfo(cliente.etapa),sp=sprodInfo(cliente.statusProducao||"aguardando");
+  const tel=(cliente.telefone||"").replace(/\D/g,"");
+  const msg=gerarMensagem(itens,precos,prNome(cliente),empresa);
+  const waUrl=tel?("https://api.whatsapp.com/send?phone=55"+tel+"&text="+encodeURIComponent(msg)):("https://api.whatsapp.com/send?text="+encodeURIComponent(msg));
+
+  function upd(patch){onUpdate({...cliente,...patch,atualizadoEm:new Date().toISOString(),dataUltimoContato:new Date().toISOString()});}
+  function updItens(novos){setDraftItens(novos);setTemAlter(true);}
+  function addItemC(){updItens([...itens,novoItem()]);}
+  function rmItemC(id){updItens(itens.filter(it=>it.id!==id));}
+  function updItemC(id,campo,valor){updItens(itens.map(it=>{if(it.id!==id)return it;if(campo==="tipo")return{id:it.id,tipo:valor,variante:Object.keys(precos[valor]||{})[0]||""};return{...it,[campo]:valor};}));}
+  function salvarCad(){onUpdate({...cliente,itens:draftItens,atualizadoEm:new Date().toISOString()});setTemAlter(false);}
+  function addObs(){if(!novaObs.trim())return;upd({obs:[...(cliente.obs||[]),{texto:novaObs.trim(),usuario:user,hora:agora(),data:hoje()}]});setNovaObs("");}
+  function salvarHistorico(){const entrada={id:Math.random(),data:hoje(),hora:agora(),usuario:user,itens:itens.map(it=>({tipo:it.tipo,variante:it.variante})),totalEss:fBR(totalEss),totalExe:fBR(totalExe),totalPre:fBR(totalPre)};upd({historicOrcamentos:[...(cliente.historicOrcamentos||[]),entrada].slice(-15)});setOrcSalvo(true);setTimeout(()=>setOrcSalvo(false),2500);}
+  function copiar(){if(navigator.clipboard&&navigator.clipboard.writeText){navigator.clipboard.writeText(msg).then(()=>{setCopiado(true);setTimeout(()=>setCopiado(false),3000);}).catch(fb);}else fb();}
+  function fb(){if(txtRef.current){txtRef.current.value=msg;txtRef.current.select();try{document.execCommand("copy");}catch(e){}}setCopiado(true);setTimeout(()=>setCopiado(false),3000);}
+  function baixarMsg(){const nome="orcamento-"+nomeExib(cliente).replace(/\s/g,"-")+"-"+new Date().toISOString().slice(0,10)+".txt";try{const blob=new Blob([msg],{type:"text/plain;charset=utf-8"});const url=URL.createObjectURL(blob);const a=document.createElement("a");a.href=url;a.download=nome;document.body.appendChild(a);a.click();document.body.removeChild(a);URL.revokeObjectURL(url);}catch(e){copiar();}}
+  function addFotoUrl(tipo,url){if(!url||!url.trim())return;const campo=tipo==="antes"?"fotosAntes":"fotosDepois";upd({[campo]:[...(cliente[campo]||[]),url.trim()].slice(-10)});setUrlFotoInput(p=>({...p,[tipo]:"")));}
+
+  const sInp={width:"100%",padding:"10px 12px",borderRadius:"8px",border:"1.5px solid rgba(26,58,92,0.10)",fontSize:"13px",outline:"none",background:"#F7F9FC",boxSizing:"border-box"};
+  const sCard={background:"#FFF",borderRadius:"14px",padding:"16px",boxShadow:"0 2px 12px rgba(26,58,92,0.08)",marginBottom:"12px"};
+  const SUBTABS=[["itens","📋 Itens"],["msg","💬 Msg"],["financeiro","💰 Fin."],["fotos","📸 Fotos"],["obs","📝 Notas"]];
+
+  return (
+    <div style={{fontFamily:"Arial,sans-serif",minHeight:"100vh",background:"#F0F4FA"}}>
+      <textarea ref={txtRef} readOnly style={{position:"absolute",left:"-9999px",top:0}} defaultValue=""/>
+      <div style={{background:"linear-gradient(90deg,#1A3A5C,#2A5280)",padding:"12px 16px"}}>
+        <button onClick={onBack} style={{background:"transparent",border:"none",color:"rgba(255,255,255,0.65)",fontSize:"13px",cursor:"pointer",marginBottom:"8px",padding:"0"}}>← Voltar ao CRM</button>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",flexWrap:"wrap",gap:"8px"}}>
+          <div>
+            <div style={{color:"#FFF",fontWeight:"bold",fontSize:"18px"}}>{nomeExib(cliente)}</div>
+            <div style={{color:"rgba(255,255,255,0.6)",fontSize:"11px",marginTop:"2px"}}>🔑 Código: <strong style={{color:"#C8A84B"}}>{gerarCodigoCliente(cliente)}</strong></div>
+            {cliente.telefone&&<div style={{color:"#C8A84B",fontSize:"12px"}}>📱 {cliente.telefone}</div>}
+          </div>
+          <div style={{display:"flex",gap:"6px",flexWrap:"wrap"}}>
+            <span style={{padding:"4px 10px",borderRadius:"20px",fontSize:"11px",fontWeight:"bold",background:ei.bg,color:ei.cor}}>{ei.label}</span>
+            <span style={{padding:"4px 10px",borderRadius:"20px",fontSize:"11px",fontWeight:"bold",background:sp.bg,color:sp.cor}}>{sp.label}</span>
+          </div>
+        </div>
+      </div>
+      <div style={{background:"#FFF",padding:"12px 16px",borderBottom:"1px solid #EEE",overflowX:"auto"}}>
+        <div style={{fontSize:"11px",fontWeight:"bold",color:"#6B7A8D",marginBottom:"6px",textTransform:"uppercase"}}>Etapa de venda</div>
+        <div style={{display:"inline-flex",gap:"5px",marginBottom:"10px"}}>
+          {ETAPAS.map(et=>{const atual=cliente.etapa===et.id;return(<button key={et.id} onClick={()=>!atual&&setPendingEtapa(et.id)} style={{padding:"5px 10px",borderRadius:"20px",border:"none",background:atual?et.cor:et.bg,color:atual?"#FFF":et.cor,fontWeight:"bold",fontSize:"10px",cursor:atual?"default":"pointer",whiteSpace:"nowrap"}}>{et.label}</button>);})}
+        </div>
+        {pendingEtapa&&<div style={{marginBottom:"10px",background:"#FFF3E0",borderRadius:"12px",padding:"12px 14px",border:"1.5px solid #E65100"}}>
+          <div style={{fontSize:"12px",color:"#E65100",fontWeight:"bold",marginBottom:"8px"}}>Mover para <strong>{etapaInfo(pendingEtapa).label}</strong>?</div>
+          <div style={{display:"flex",gap:"8px"}}>
+            <button onClick={()=>setPendingEtapa(null)} style={{flex:1,padding:"9px",borderRadius:"9px",border:"1.5px solid #DDD",background:"#FFF",color:"#555",fontWeight:"bold",fontSize:"12px",cursor:"pointer"}}>Cancelar</button>
+            <button onClick={()=>{upd({etapa:pendingEtapa});setPendingEtapa(null);}} style={{flex:2,padding:"9px",borderRadius:"9px",border:"none",background:etapaInfo(pendingEtapa).cor,color:"#FFF",fontWeight:"bold",fontSize:"12px",cursor:"pointer"}}>✅ Confirmar</button>
+          </div>
+        </div>}
+        {(()=>{const tel2=(cliente.telefone||"").replace(/[^0-9]/g,"");const info=MSGS_FOLLOWUP[cliente.etapa];const nomeP=cliente.nome?cliente.nome.split(" ")[0]:"cliente";if(!info||tel2.length<10||["perdido"].includes(cliente.etapa))return null;return(
+          <div style={{marginBottom:"10px",background:"#EEF4FB",borderRadius:"12px",padding:"12px 14px"}}>
+            <div style={{fontSize:"11px",color:"#1A3A5C",fontWeight:"bold",marginBottom:"6px"}}>{info.titulo}</div>
+            <a href={"https://wa.me/55"+tel2+"?text="+encodeURIComponent(info.msg(nomeP))} target="_blank" rel="noopener noreferrer" style={{display:"flex",alignItems:"center",justifyContent:"center",gap:"8px",padding:"11px",borderRadius:"10px",background:"#25D366",color:"#FFF",fontWeight:"bold",fontSize:"13px",textDecoration:"none"}}>💬 Enviar — {info.proximo}</a>
+          </div>
+        );})()}
+        <div style={{fontSize:"11px",fontWeight:"bold",color:"#6B7A8D",marginBottom:"6px",textTransform:"uppercase"}}>Status de produção</div>
+        <div style={{display:"inline-flex",gap:"5px"}}>
+          {SPRODS.map(s=><button key={s.id} onClick={()=>upd({statusProducao:s.id})} style={{padding:"5px 10px",borderRadius:"20px",border:"none",background:(cliente.statusProducao||"aguardando")===s.id?s.cor:s.bg,color:(cliente.statusProducao||"aguardando")===s.id?"#FFF":s.cor,fontWeight:"bold",fontSize:"10px",cursor:"pointer",whiteSpace:"nowrap"}}>{s.label}</button>)}
+        </div>
+      </div>
+      <div style={{background:"#FFF",padding:"0 16px",display:"flex",gap:"4px",borderBottom:"1px solid #EEE",overflowX:"auto"}}>
+        {SUBTABS.map(st=><button key={st[0]} onClick={()=>setSubAba(st[0])} style={{padding:"10px 12px",border:"none",cursor:"pointer",fontWeight:"bold",fontSize:"12px",background:"transparent",color:subAba===st[0]?"#1A3A5C":"#6B7A8D",borderBottom:subAba===st[0]?"3px solid #1A3A5C":"3px solid transparent",whiteSpace:"nowrap"}}>{st[1]}</button>)}
+      </div>
+      <div style={{padding:"14px 16px 80px",maxWidth:"680px",margin:"0 auto"}}>
+        {subAba==="itens"&&<div>
+          {itens.map((it,i)=><ItemCard key={it.id} item={it} idx={i} total={itens.length} precos={precos} onUpdate={updItemC} onRemove={rmItemC}/>)}
+          <button onClick={addItemC} style={{width:"100%",padding:"12px",borderRadius:"10px",border:"2px dashed #2A5280",background:"transparent",color:"#1A3A5C",fontWeight:"bold",fontSize:"13px",cursor:"pointer",marginBottom:"12px"}}>+ Adicionar item</button>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:"8px",marginBottom:"12px"}}>
+            {[["🔵 Essencial",totalEss,"#ECEFF1","#37474F"],["⭐ Executivo",totalExe,"#E3F2FD","#1565C0"],["💎 Premium",totalPre,"#F3E5F5","#6A1B9A"]].map(x=><div key={x[0]} style={{background:x[2],borderRadius:"10px",padding:"10px",textAlign:"center"}}><div style={{fontSize:"10px",color:x[3],fontWeight:"bold"}}>{x[0]}</div><div style={{fontSize:"15px",fontWeight:"bold",color:x[3]}}>R$ {fBR(x[1])}</div><div style={{fontSize:"10px",color:x[3]}}>10x {parc(x[1])}</div></div>)}
+          </div>
+          {temAlter&&<button onClick={salvarCad} style={{width:"100%",padding:"12px",borderRadius:"10px",border:"none",background:"#1B5E20",color:"#FFF",fontWeight:"bold",fontSize:"14px",cursor:"pointer",marginBottom:"12px"}}>✅ Salvar alterações dos itens</button>}
+          <div style={sCard}>
+            <div style={{fontWeight:"bold",color:"#1A3A5C",fontSize:"13px",marginBottom:"12px",borderBottom:"2px solid #C8A84B",paddingBottom:"6px"}}>🚗 Logística</div>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"10px"}}>
+              <div><div style={{fontSize:"11px",fontWeight:"bold",color:"#E65100",marginBottom:"4px"}}>🚗 Coleta</div><input type="date" value={cliente.dataColeta||""} onChange={e=>upd({dataColeta:e.target.value})} style={{...sInp,background:"#FFF3E0"}}/></div>
+              <div><div style={{fontSize:"11px",fontWeight:"bold",color:"#1B5E20",marginBottom:"4px"}}>🚚 Entrega</div><input type="date" value={cliente.dataEntrega||""} onChange={e=>upd({dataEntrega:e.target.value})} style={{...sInp,background:"#E8F5E9"}}/></div>
+            </div>
+          </div>
+        </div>}
+        {subAba==="msg"&&<div>
+          <div style={{display:"flex",gap:"8px",marginBottom:"8px"}}>
+            <button onClick={copiar} style={{flex:1,padding:"11px",borderRadius:"10px",border:"none",background:copiado?"#1B5E20":"#1A3A5C",color:"#FFF",fontWeight:"bold",fontSize:"13px",cursor:"pointer"}}>{copiado?"✅ Copiado!":"📋 Copiar"}</button>
+            <a href={waUrl} target="_blank" rel="noopener noreferrer" style={{flex:1,padding:"11px",borderRadius:"10px",background:"#25D366",color:"#FFF",fontWeight:"bold",fontSize:"13px",textAlign:"center",textDecoration:"none",display:"flex",alignItems:"center",justifyContent:"center"}}>📲 WhatsApp</a>
+          </div>
+          <button onClick={baixarMsg} style={{width:"100%",padding:"10px",borderRadius:"10px",border:"1.5px solid #1A3A5C",background:"#EEF4FB",color:"#1A3A5C",fontWeight:"bold",fontSize:"13px",cursor:"pointer",marginBottom:"8px"}}>⬇️ Baixar orçamento (.txt)</button>
+          <button onClick={salvarHistorico} style={{width:"100%",padding:"10px",borderRadius:"10px",border:"1.5px solid rgba(26,58,92,0.15)",background:orcSalvo?"#E8F5E9":"#FFF",color:orcSalvo?"#1B5E20":"#1A3A5C",fontWeight:"bold",fontSize:"12px",cursor:"pointer",marginBottom:"10px"}}>{orcSalvo?"✅ Orçamento registrado!":"💾 Registrar envio deste orçamento"}</button>
+          <textarea ref={txtRef} value={msg} readOnly onClick={e=>e.target.select()} style={{width:"100%",minHeight:"300px",borderRadius:"12px",border:"1.5px solid rgba(26,58,92,0.10)",padding:"12px",fontSize:"12px",fontFamily:"monospace",background:"#FAFAFA",outline:"none",boxSizing:"border-box",resize:"vertical",lineHeight:"1.65",color:"#1C2B3A"}}/>
+        </div>}
+        {subAba==="financeiro"&&<div>
+          <div style={sCard}>
+            <div style={{fontWeight:"bold",color:"#1A3A5C",fontSize:"13px",marginBottom:"12px"}}>💰 Controle Financeiro</div>
+            <div style={{marginBottom:"14px"}}>
+              <div style={{fontSize:"11px",fontWeight:"bold",color:"#1A3A5C",marginBottom:"8px",textTransform:"uppercase"}}>✅ Plano escolhido</div>
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:"8px"}}>
+                {[{val:"ess",icon:"🔵",nome:"Essencial",total:totalEss,cor:"#37474F",bg:"#ECEFF1",borda:"#90A4AE"},{val:"exe",icon:"⭐",nome:"Executivo",total:totalExe,cor:"#1565C0",bg:"#E3F2FD",borda:"#1565C0"},{val:"pre",icon:"💎",nome:"Premium",total:totalPre,cor:"#6A1B9A",bg:"#F3E5F5",borda:"#6A1B9A"}].map(plan=>{const ativo=cliente.planoEscolhido===plan.val;return(
+                  <button key={plan.val} onClick={()=>upd({planoEscolhido:ativo?"":plan.val})} style={{padding:"12px 6px",borderRadius:"12px",border:ativo?("3px solid "+plan.borda):"2px solid #EEE",background:ativo?plan.bg:"#FFF",cursor:"pointer",textAlign:"center"}}>
+                    <div style={{fontSize:"20px",marginBottom:"4px"}}>{ativo?"✅":plan.icon}</div>
+                    <div style={{fontSize:"11px",fontWeight:"bold",color:ativo?plan.cor:"#888"}}>{plan.nome}</div>
+                    <div style={{fontSize:"12px",fontWeight:"bold",color:ativo?plan.cor:"#AAA",marginTop:"3px"}}>R$ {fBR(plan.total)}</div>
+                  </button>
+                );})}
+              </div>
+            </div>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"10px",marginBottom:"10px"}}>
+              <div><div style={{fontSize:"11px",fontWeight:"bold",color:"#6A1B9A",marginBottom:"4px"}}>🎨 Tecido</div><input value={cliente.tecidoEscolhido||""} onChange={e=>upd({tecidoEscolhido:e.target.value})} placeholder="Ex: Veludo Inca" style={sInp}/></div>
+              <div><div style={{fontSize:"11px",fontWeight:"bold",color:"#6A1B9A",marginBottom:"4px"}}>🎨 Cor</div><input value={cliente.corEscolhida||""} onChange={e=>upd({corEscolhida:e.target.value})} placeholder="Ex: Cinza" style={sInp}/></div>
+            </div>
+            <div style={{marginBottom:"10px"}}><div style={{fontSize:"11px",fontWeight:"bold",color:"#C62828",marginBottom:"4px"}}>🏷️ Desconto (R$)</div><input value={cliente.desconto||"0"} onChange={e=>upd({desconto:e.target.value.replace(/[^0-9.,]/g,"")})} style={sInp}/></div>
+            <div style={{background:"#EEF4FB",borderRadius:"12px",padding:"14px",marginBottom:"14px"}}>
+              <div style={{display:"flex",justifyContent:"space-between",marginBottom:"6px"}}><span style={{fontSize:"13px",color:"#6B7A8D"}}>Valor final:</span><span style={{fontSize:"14px",fontWeight:"bold",color:"#1A3A5C"}}>R$ {fBR(planoVal)}</span></div>
+              <div style={{display:"flex",justifyContent:"space-between",marginBottom:"6px"}}><span style={{fontSize:"13px",color:"#6B7A8D"}}>Recebido:</span><span style={{fontSize:"14px",fontWeight:"bold",color:"#1B5E20"}}>R$ {fBR(recebido)}</span></div>
+              <div style={{display:"flex",justifyContent:"space-between",paddingTop:"8px",borderTop:"1px solid rgba(26,58,92,0.10)"}}><span style={{fontSize:"13px",fontWeight:"bold",color:"#6B7A8D"}}>Saldo devedor:</span><span style={{fontSize:"15px",fontWeight:"bold",color:saldoDev>0?"#C62828":"#1B5E20"}}>R$ {fBR(saldoDev)}</span></div>
+            </div>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"10px"}}>
+              {[["Entrada R$","entradaPaga"],["Saldo R$","saldoPago"]].map(x=><div key={x[1]}><div style={{fontSize:"11px",fontWeight:"bold",color:"#1A3A5C",marginBottom:"3px"}}>{x[0]}</div><input value={cliente[x[1]]||"0"} onChange={e=>upd({[x[1]]:e.target.value.replace(/[^0-9.,]/g,"")})} style={{...sInp,textAlign:"center",fontWeight:"bold"}}/></div>)}
+            </div>
+          </div>
+          <div style={sCard}>
+            <div style={{fontWeight:"bold",color:"#1A3A5C",fontSize:"13px",marginBottom:"12px"}}>🧮 Custo e Margem</div>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:"8px",marginBottom:"14px"}}>
+              {[["Tecido","custoTecido"],["Espuma","custoEspuma"],["Mão de obra","custoMaoObra"]].map(x=><div key={x[1]}><div style={{fontSize:"11px",fontWeight:"bold",color:"#1A3A5C",marginBottom:"3px"}}>{x[0]}</div><input value={cliente[x[1]]||"0"} onChange={e=>upd({[x[1]]:e.target.value.replace(/[^0-9.,]/g,"")})} style={{...sInp,textAlign:"center",fontSize:"12px"}}/></div>)}
+            </div>
+            <div style={{background:margem>=40?"#E8F5E9":margem>=20?"#FFF8E7":"#FFEBEE",borderRadius:"12px",padding:"14px"}}>
+              <div style={{display:"flex",justifyContent:"space-between",marginBottom:"4px"}}><span style={{fontSize:"12px",color:"#6B7A8D"}}>Custo total:</span><span style={{fontSize:"13px",fontWeight:"bold"}}>R$ {fBR(custTotal)}</span></div>
+              <div style={{display:"flex",justifyContent:"space-between"}}><span style={{fontSize:"13px",fontWeight:"bold"}}>Margem:</span><span style={{fontSize:"20px",fontWeight:"bold",color:margem>=40?"#1B5E20":margem>=20?"#F57F17":"#C62828"}}>{margem.toFixed(1)}%</span></div>
+            </div>
+          </div>
+        </div>}
+        {subAba==="fotos"&&<div>
+          {[["antes","📷 Antes","#1A3A5C","fotosAntes"],["depois","✨ Depois","#1B5E20","fotosDepois"]].map(x=>(
+            <div key={x[0]} style={sCard}>
+              <div style={{fontWeight:"bold",color:x[2],fontSize:"13px",marginBottom:"10px"}}>{x[1]}</div>
+              <div style={{display:"flex",gap:"8px",marginBottom:"10px"}}>
+                <input value={urlFotoInput[x[0]]} onChange={e=>{const v=e.target.value;setUrlFotoInput(p=>({...p,[x[0]]:v}));}} onKeyDown={e=>e.key==="Enter"&&addFotoUrl(x[0],urlFotoInput[x[0]])} placeholder="Cole o link da foto..." style={{...sInp,flex:1}}/>
+                <button onClick={()=>addFotoUrl(x[0],urlFotoInput[x[0]])} style={{padding:"8px 14px",borderRadius:"8px",border:"none",background:x[2],color:"#FFF",fontSize:"12px",fontWeight:"bold",cursor:"pointer"}}>+ Add</button>
+              </div>
+              {(cliente[x[3]]||[]).length===0?<div style={{textAlign:"center",color:"#6B7A8D",fontSize:"12px",padding:"16px 0"}}>Nenhuma foto</div>
+              :<div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:"8px"}}>{(cliente[x[3]]||[]).map((f,i)=><div key={i} style={{position:"relative"}}><img src={f} alt="" style={{width:"100%",aspectRatio:"1",objectFit:"cover",borderRadius:"10px"}} onError={e=>e.target.style.display="none"}/><button onClick={()=>upd({[x[3]]:(cliente[x[3]]||[]).filter((_,j)=>j!==i)})} style={{position:"absolute",top:"4px",right:"4px",background:"rgba(0,0,0,0.6)",border:"none",color:"#FFF",borderRadius:"50%",width:"22px",height:"22px",cursor:"pointer",fontSize:"11px"}}>✕</button></div>)}</div>}
+            </div>
+          ))}
+          {["entregue","posvenda"].includes(cliente.etapa)&&<div style={sCard}>
+            <div style={{fontWeight:"bold",color:"#1A3A5C",fontSize:"13px",marginBottom:"12px"}}>⭐ Avaliação</div>
+            <div style={{display:"flex",gap:"8px",marginBottom:"12px"}}>{[1,2,3,4,5].map(n=><button key={n} onClick={()=>upd({notaSatisfacao:n})} style={{flex:1,padding:"10px 4px",borderRadius:"10px",border:"2px solid "+(cliente.notaSatisfacao>=n?"#F57F17":"rgba(26,58,92,0.10)"),background:cliente.notaSatisfacao>=n?"#FFF8E7":"#FFF",fontSize:"20px",cursor:"pointer"}}>{n<=cliente.notaSatisfacao?"⭐":"☆"}</button>)}</div>
+            <label style={{fontSize:"13px",color:"#1C2B3A",fontWeight:"600",display:"flex",alignItems:"center",gap:"8px",cursor:"pointer"}}><input type="checkbox" checked={!!cliente.indicouCliente} onChange={e=>upd({indicouCliente:e.target.checked})} style={{width:"18px",height:"18px"}}/>Cliente indicou alguém 🎉</label>
+          </div>}
+        </div>}
+        {subAba==="obs"&&<div>
+          <div style={sCard}>
+            <div style={{fontWeight:"bold",color:"#C8A84B",fontSize:"13px",marginBottom:"12px"}}>🎁 Indicação</div>
+            <div style={{marginBottom:"12px"}}><div style={{fontSize:"11px",fontWeight:"bold",color:"#C8A84B",marginBottom:"4px"}}>Indicado por</div><input value={cliente.indicadoPor||""} onChange={e=>upd({indicadoPor:e.target.value})} placeholder="Nome de quem indicou..." style={{...sInp,borderColor:"rgba(200,168,75,0.35)",background:"#FFFDF0"}}/></div>
+          </div>
+          <div style={{marginBottom:"14px"}}>
+            <textarea value={novaObs} onChange={e=>setNovaObs(e.target.value)} placeholder="Observação..." style={{...sInp,minHeight:"80px",resize:"vertical",lineHeight:"1.5"}}/>
+            <button onClick={addObs} disabled={!novaObs.trim()} style={{width:"100%",marginTop:"8px",padding:"11px",borderRadius:"10px",border:"none",background:novaObs.trim()?"#1A3A5C":"#CCC",color:"#FFF",fontWeight:"bold",fontSize:"13px",cursor:novaObs.trim()?"pointer":"default"}}>+ Salvar</button>
+          </div>
+          {(cliente.obs||[]).slice().reverse().map((o,i)=><div key={i} style={{background:"#FFF",borderRadius:"12px",padding:"14px",marginBottom:"8px",borderLeft:"3px solid #1A3A5C",boxShadow:"0 1px 6px rgba(26,58,92,0.06)"}}><div style={{fontSize:"11px",color:"#6B7A8D",marginBottom:"6px"}}>👤 {o.usuario} · {o.data} {o.hora}</div><div style={{fontSize:"13px",color:"#1C2B3A",whiteSpace:"pre-wrap",lineHeight:"1.5"}}>{o.texto}</div></div>)}
+        </div>}
+        <div style={{marginTop:"24px",paddingTop:"16px",borderTop:"1px solid rgba(26,58,92,0.10)"}}>
+          <button onClick={()=>{if(window.confirm("Remover \""+nomeExib(cliente)+"\"?"))onDelete(cliente.id);}} style={{width:"100%",padding:"11px",borderRadius:"10px",border:"1.5px solid #C62828",background:"#FFEBEE",color:"#C62828",fontWeight:"bold",fontSize:"13px",cursor:"pointer"}}>🗑 Remover este cliente</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ════════════════════════════════════════════════
+   APP PRINCIPAL
+════════════════════════════════════════════════ */
+function App() {
+  const [user,setUser]=useState("");
+  const [senhaOk,setSenhaOk]=useState(false);
+  const [precos,setPrecos]=useState(PRECOS_ORIG);
+  const [clientes,setClientes]=useState([]);
+  const [tecidos,setTecidos]=useState([]);
+  const [metas,setMetas]=useState([]);
+  const [itensOrc,setItensOrc]=useState([novoItem()]);
+  const [tab,setTab]=useState("funil");
+  const [copiadoOrc,setCopiadoOrc]=useState(false);
+  const [salvando,setSalvando]=useState(false);
+  const [sync,setSync]=useState("ok");
+  const [ultimaSync,setUltimaSync]=useState("");
+  const [clienteSel,setClienteSel]=useState(null);
+  const [empresa,setEmpresa]=useState({nome:"BS Móveis Estofados",whatsapp:"5571985039240",cidade:"Salvador e Lauro de Freitas",saudacao:"Aqui é da *BS Móveis Estofados* e preparei"});
+  const [filtroEtapa,setFiltroEtapa]=useState("todos");
+  const [filtroVendedor,setFiltroVendedor]=useState("todos");
+  const [busca,setBusca]=useState("");
+  const [modoKanban,setModoKanban]=useState(false);
+  const [modalNovo,setModalNovo]=useState(false);
+  const [novoC,setNovoC]=useState({nome:"",telefone:"",indicadoPor:""});
+  const [log,setLog]=useState([]);
+  const [editandoPreco,setEditandoPreco]=useState(null);
+  const [editVals,setEditVals]=useState({});
+  const [objecaoCop,setObjecaoCop]=useState(null);
+  const [iaMsgs,setIaMsgs]=useState([]);
+  const [iaInput,setIaInput]=useState("");
+  const [iaLoading,setIaLoading]=useState(false);
+  const [novoTecido,setNovoTecido]=useState({nome:"",cor:"",metros:"0",minimo:"2",plano:"exe"});
+  const [novaMeta,setNovaMeta]=useState({vendedor:"",meta:"0",comissaoPct:"5",mes:mesAtual()});
+  const [secaoConfig,setSecaoConfig]=useState("backup");
+  const [exportCopiado,setExportCopiado]=useState(false);
+  const [draftEmp,setDraftEmp]=useState(empresa);
+  const [empSalvo,setEmpSalvo]=useState(false);
+  const [showJsonArea,setShowJsonArea]=useState(false);
+  const [jsonText,setJsonText]=useState("");
+  const [pendingImport,setPendingImport]=useState(null);
+  const [importStatus,setImportStatus]=useState(null);
+
+  const txtRefOrc=useRef(null);
+  const iaBottomRef=useRef(null);
+  const ultimoJson=useRef(null);
+  const precosRef=useRef(precos);
+  const clientesRef=useRef(clientes);
+  const tecidosRef=useRef(tecidos);
+  const metasRef=useRef(metas);
+  const logRef=useRef(log);
+  const userRef=useRef(user);
+  const empresaRef=useRef(empresa);
+
+  useEffect(()=>{window.storage.get("bsmoveis-user",false).then(r=>{if(r&&r.value)setUser(r.value);}).catch(()=>{});},[]);
+  useEffect(()=>{empresaRef.current=empresa;},[empresa]);
+  useEffect(()=>{clientesRef.current=clientes;},[clientes]);
+  useEffect(()=>{tecidosRef.current=tecidos;},[tecidos]);
+  useEffect(()=>{metasRef.current=metas;},[metas]);
+  useEffect(()=>{logRef.current=log;},[log]);
+  useEffect(()=>{userRef.current=user;},[user]);
+
+  useEffect(()=>{
+    if(!user)return;
+    carregar(false);
+    const id=setInterval(()=>carregar(true),20000);
+    return()=>clearInterval(id);
+  },[user]);
+
+  function carregar(silencioso){
+    if(!silencioso)setSync("loading");
+    window.storage.get(SK,true).then(r=>{
+      if(r&&r.value){
+        if(r.value===ultimoJson.current){if(!silencioso)setSync("ok");return;}
+        ultimoJson.current=r.value;
+        const d=JSON.parse(r.value);
+        if(d.precos)setPrecos(d.precos);
+        if(d.clientes)setClientes(d.clientes);
+        if(d.tecidos)setTecidos(d.tecidos);
+        if(d.metas)setMetas(d.metas);
+        if(d.log)setLog(d.log.slice(-40));
+        if(d.empresa)setEmpresa(d.empresa);
+      }
+      if(!silencioso){setSync("ok");setUltimaSync(agora());}
+    }).catch(()=>{if(!silencioso)setSync("erro");});
+  }
+
+  function salvarTudo(np,nc,nt,nm,acao,ne){
+    const novoPrecos=np||precosRef.current;
+    const novoClientes=nc||clientesRef.current;
+    const novoTecidos=nt||tecidosRef.current;
+    const novoMetas=nm||metasRef.current;
+    const novoEmpresa=ne||empresaRef.current;
+    const nl=[...logRef.current,{user:userRef.current,acao,hora:agora()}].slice(-40);
+    precosRef.current=novoPrecos;clientesRef.current=novoClientes;tecidosRef.current=novoTecidos;metasRef.current=novoMetas;logRef.current=nl;empresaRef.current=novoEmpresa;
+    if(np)setPrecos(np);if(nc)setClientes(nc);if(nt)setTecidos(nt);if(nm)setMetas(nm);if(ne){setEmpresa(ne);setDraftEmp(ne);}setLog(nl);
+    setSalvando(true);setSync("loading");
+    const payload={precos:novoPrecos,clientes:novoClientes,tecidos:novoTecidos,metas:novoMetas,log:nl,empresa:novoEmpresa};
+    const json=JSON.stringify(payload);ultimoJson.current=json;
+    window.storage.set(SK,json,true).then(()=>{setSync("ok");setUltimaSync(agora());setSalvando(false);}).catch(()=>{setSync("erro");setSalvando(false);});
+  }
+
+  function login(nome){window.storage.set("bsmoveis-user",nome,false).catch(()=>{});setUser(nome);}
+  function logout(){window.storage.delete("bsmoveis-user",false).catch(()=>{});setUser("");setClienteSel(null);}
+  function criarCliente(){if(!novoC.nome.trim()&&!novoC.telefone.trim())return;const novo={...novoCliente(novoC.nome,novoC.telefone,user),indicadoPor:(novoC.indicadoPor||"").trim()};salvarTudo(null,[...clientesRef.current,novo],null,null,"Novo cliente: "+nomeExib(novo));setModalNovo(false);setNovoC({nome:"",telefone:"",indicadoPor:""});setClienteSel(novo);}
+  function atualizarCliente(cli){salvarTudo(null,clientesRef.current.map(c=>c.id===cli.id?cli:c),null,null,"Atualizou: "+nomeExib(cli));setClienteSel(cli);}
+  function deletarCliente(id){salvarTudo(null,clientesRef.current.filter(c=>c.id!==id),null,null,"Removeu cliente");setClienteSel(null);}
+
+  function addItemOrc(){setItensOrc(p=>[...p,novoItem()]);}
+  function rmItemOrc(id){setItensOrc(p=>p.filter(x=>x.id!==id));}
+  function updItemOrc(id,campo,valor){setItensOrc(prev=>prev.map(it=>{if(it.id!==id)return it;if(campo==="tipo")return{id:it.id,tipo:valor,variante:Object.keys(precos[valor]||{})[0]||""};return{...it,[campo]:valor};}));}
+
+  const msgOrc=gerarMensagem(itensOrc,precos,null,empresa);
+  const waUrlOrc="https://api.whatsapp.com/send?text="+encodeURIComponent(msgOrc);
+
+  function copiarOrc(){if(navigator.clipboard&&navigator.clipboard.writeText){navigator.clipboard.writeText(msgOrc).then(()=>{setCopiadoOrc(true);setTimeout(()=>setCopiadoOrc(false),3000);}).catch(fbOrc);}else fbOrc();}
+  function fbOrc(){if(txtRefOrc.current){txtRefOrc.current.value=msgOrc;txtRefOrc.current.select();try{document.execCommand("copy");}catch(e){}}setCopiadoOrc(true);setTimeout(()=>setCopiadoOrc(false),3000);}
+  function baixarOrc(){const nome="orcamento-bsmoveis-"+new Date().toISOString().slice(0,10)+".txt";try{const blob=new Blob([msgOrc],{type:"text/plain;charset=utf-8"});const url=URL.createObjectURL(blob);const a=document.createElement("a");a.href=url;a.download=nome;document.body.appendChild(a);a.click();document.body.removeChild(a);URL.revokeObjectURL(url);}catch(e){fbOrc();}}
+
+  function exportarJSON(){const dados={precos,clientes,tecidos,metas,log,empresa,exportadoEm:new Date().toISOString(),versao:"v3"};const json=JSON.stringify(dados,null,2);try{const blob=new Blob([json],{type:"application/json"});const url=URL.createObjectURL(blob);const a=document.createElement("a");a.href=url;a.download="bsmoveis-backup-"+new Date().toISOString().slice(0,10)+".json";document.body.appendChild(a);a.click();document.body.removeChild(a);URL.revokeObjectURL(url);}catch(e){setJsonText(json);setShowJsonArea(true);}}
+  function copiarJSON(){const dados={precos,clientes,tecidos,metas,log,empresa,exportadoEm:new Date().toISOString(),versao:"v3"};const json=JSON.stringify(dados,null,2);setJsonText(json);setShowJsonArea(true);if(navigator.clipboard&&navigator.clipboard.writeText)navigator.clipboard.writeText(json).then(()=>{setExportCopiado(true);setTimeout(()=>setExportCopiado(false),3000);}).catch(()=>{});}
+  function importarJSON(e){const file=e.target.files[0];if(!file)return;const reader=new FileReader();reader.onload=ev=>{try{const d=JSON.parse(ev.target.result);if(!d.clientes&&!d.precos)throw new Error("inválido");setPendingImport(d);}catch(err){setImportStatus("erro");setTimeout(()=>setImportStatus(null),5000);}};reader.readAsText(file);e.target.value="";}
+  function confirmarImport(){if(!pendingImport)return;salvarTudo(pendingImport.precos||null,pendingImport.clientes||null,pendingImport.tecidos||null,pendingImport.metas||null,"Restaurou backup JSON",pendingImport.empresa||null);setPendingImport(null);setImportStatus("ok");setTimeout(()=>setImportStatus(null),5000);}
+  function salvarPreco(){if(!editandoPreco)return;const np=JSON.parse(JSON.stringify(precos));np[editandoPreco.tipo][editandoPreco.variante]={ess:editVals.ess,exe:editVals.exe,pre:editVals.pre};salvarTudo(np,null,null,null,"Editou preço: "+editandoPreco.tipo+" — "+editandoPreco.variante);setEditandoPreco(null);}
+  function salvarEmp(){salvarTudo(null,null,null,null,"Atualizou config empresa",draftEmp);setEmpSalvo(true);setTimeout(()=>setEmpSalvo(false),2500);}
+
+  function buildPrompt(){const precosTxt=Object.entries(precos).map(e=>Object.entries(e[1]).map(v=>e[0]+"—"+v[0]+": Ess R$"+v[1].ess+"|Exe R$"+v[1].exe+"|Pre R$"+v[1].pre).join("\n")).join("\n");const cliTxt=clientes.length===0?"Nenhum cliente.":clientes.map(c=>{const tx=(c.itens||[]).reduce((s,it)=>{const p=precos[it.tipo]&&precos[it.tipo][it.variante];return s+(p?toN(p.exe):0);},0);return "• "+nomeExib(c)+" | "+etapaInfo(c.etapa).label+" | R$"+fBR(tx)+" | "+diasSemContato(c)+"d sem contato";}).join("\n");return "Você é a ARIA, assistente especialista em vendas da BS Móveis Estofados (Salvador/Lauro de Freitas, BA). Ajude a equipe. Seja direta, prática, português do Brasil.\n\nPREÇOS:\n"+precosTxt+"\n\nPLANOS: 🔵Essencial(D-23) | ⭐Executivo(D-28) — MAIS ESCOLHIDO | 💎Premium(D-33)\n\nCLIENTES:\n"+cliTxt;}
+  function enviarIA(){if(!iaInput.trim())return;const pergunta=iaInput.trim();setIaInput("");setIaLoading(true);const novaMsg={role:"user",content:pergunta};const msgsAtual=[...iaMsgs,novaMsg];setIaMsgs(msgsAtual);fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:1000,system:buildPrompt(),messages:msgsAtual.map(m=>({role:m.role,content:m.content}))})}).then(r=>r.json()).then(data=>{const texto=(data.content&&data.content.find(b=>b.type==="text"))||{text:"Não entendi, tente reformular."};setIaMsgs(p=>[...p,{role:"assistant",content:texto.text}]);setIaLoading(false);setTimeout(()=>{if(iaBottomRef.current)iaBottomRef.current.scrollIntoView({behavior:"smooth"});},100);}).catch(()=>{setIaMsgs(p=>[...p,{role:"assistant",content:"Erro ao conectar. Verifique a chave da API Anthropic."}]);setIaLoading(false);});}
+
+  if(!senhaOk)return <TelaSenha onOk={()=>setSenhaOk(true)}/>;
+  if(!user)return <TelaLogin onLogin={login}/>;
+  if(clienteSel)return <ClienteDetalhe cliente={clienteSel} user={user} precos={precos} empresa={empresa} onUpdate={atualizarCliente} onBack={()=>setClienteSel(null)} onDelete={deletarCliente}/>;
+
+  const vendedores=clientes.reduce((acc,c)=>{if(c.vendedor&&!acc.includes(c.vendedor))acc.push(c.vendedor);return acc;},[]);
+  const cliFiltrados=clientes.filter(c=>{
+    if(filtroEtapa!=="todos"&&c.etapa!==filtroEtapa)return false;
+    if(filtroVendedor!=="todos"&&c.vendedor!==filtroVendedor)return false;
+    if(busca){const b=busca.toLowerCase().trim();const campos=[nomeExib(c),c.telefone||"",c.tecidoEscolhido||"",gerarCodigoCliente(c),c.vendedor||"",(c.itens||[]).map(it=>it.tipo).join(" ")];if(!campos.some(v=>v.toLowerCase().includes(b)))return false;}
+    return true;
+  }).sort((a,b)=>new Date(b.atualizadoEm||0)-new Date(a.atualizadoEm||0));
+
+  const alertasCount=clientes.filter(c=>!["perdido","posvenda","entregue"].includes(c.etapa)&&diasSemContato(c)>=3).length;
+  const totalFechados=clientes.filter(c=>["fechado","entregue","posvenda"].includes(c.etapa)).length;
+  const taxaConv=clientes.length>0?(totalFechados/clientes.length*100):0;
+  const syncBg=sync==="ok"?"#E8F5E9":sync==="loading"?"#FFF8E7":"#FFEBEE";
+  const syncCor=sync==="ok"?"#1B5E20":sync==="loading"?"#7A6020":"#C62828";
+  const syncTxt=sync==="ok"?(ultimaSync?"✅ "+ultimaSync:"✅ OK"):sync==="loading"?"⏳…":"❌ Erro";
+
+  const sInp={width:"100%",padding:"10px 12px",borderRadius:"8px",border:"1.5px solid rgba(26,58,92,0.10)",fontSize:"13px",outline:"none",background:"#F7F9FC",boxSizing:"border-box"};
+  const sCard={background:"#FFF",borderRadius:"14px",padding:"16px",boxShadow:"0 2px 12px rgba(26,58,92,0.08)",marginBottom:"12px"};
+  const TABS=[["funil","👥 CRM"],["producao","⚙️ Prod."],["financeiro","💰 Fin."],["dashboard","📊 Dash"],["orcamento","📋 Orçamento"],["objecoes","🛡 Objeções"],["posvenda","⭐ Pós-Venda"],["ia","🤖 ARIA"],["config","⚙️ Config"]];
+
+  // Dashboard data
+  const meses6=[];
+  for(let mi=5;mi>=0;mi--){const d=new Date();d.setDate(1);d.setMonth(d.getMonth()-mi);const key=d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0");const label=d.toLocaleDateString("pt-BR",{month:"short"}).replace(".","");meses6.push({key,label:label.charAt(0).toUpperCase()+label.slice(1),total:0,count:0});}
+  clientes.filter(c=>["fechado","entregue","posvenda"].includes(c.etapa)).forEach(c=>{const dt=new Date(c.atualizadoEm||c.criadoEm||Date.now());const key=dt.getFullYear()+"-"+String(dt.getMonth()+1).padStart(2,"0");const m=meses6.find(x=>x.key===key);if(m){const val=(c.itens||[]).reduce((s,it)=>{const p=precos[it.tipo]&&precos[it.tipo][it.variante];return s+(p?toN(p.exe):0);},0);m.total+=val;m.count+=1;}});
+  const maxBar=Math.max(...meses6.map(m=>m.total));
+  const CORES_BAR=["#B3C8E8","#90AED4","#6E94C0","#4C7AAC","#2A6098","#1A3A5C"];
+  const CustomTooltip=({active,payload})=>{if(!active||!payload||!payload.length)return null;const m=payload[0].payload;return(<div style={{background:"#1A3A5C",borderRadius:"10px",padding:"10px 14px"}}><div style={{color:"#C8A84B",fontWeight:"bold",fontSize:"12px"}}>{m.label}</div><div style={{color:"#FFF",fontSize:"13px",fontWeight:"bold"}}>R$ {fBR(m.total)}</div><div style={{color:"rgba(255,255,255,0.65)",fontSize:"11px"}}>{m.count} fechamento{m.count!==1?"s":""}</div></div>);};
+  const planos={ess:0,exe:0,pre:0};
+  clientes.filter(c=>["fechado","entregue","posvenda"].includes(c.etapa)).forEach(c=>{if(c.planoEscolhido)planos[c.planoEscolhido]=(planos[c.planoEscolhido]||0)+1;});
+
+  return (
+    <div style={{fontFamily:"Arial,sans-serif",background:"#F0F4FA",minHeight:"100vh"}}>
+      <textarea ref={txtRefOrc} readOnly style={{position:"absolute",left:"-9999px",top:0}} defaultValue=""/>
+
+      {/* Modal editar preço */}
+      {editandoPreco&&<div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.55)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:1000,padding:"16px"}}>
+        <div style={{background:"#FFF",borderRadius:"18px",padding:"24px",maxWidth:"380px",width:"100%",boxShadow:"0 24px 64px rgba(0,0,0,0.28)"}}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:"18px"}}><div style={{fontWeight:"bold",color:"#1A3A5C",fontSize:"17px"}}>✏️ Editar Preço</div><button onClick={()=>setEditandoPreco(null)} style={{background:"transparent",border:"none",fontSize:"20px",cursor:"pointer",color:"#6B7A8D"}}>✕</button></div>
+          <div style={{fontSize:"12px",color:"#6B7A8D",marginBottom:"14px"}}>{editandoPreco.tipo} — {editandoPreco.variante}</div>
+          {[["🔵 Essencial","ess"],["⭐ Executivo","exe"],["💎 Premium","pre"]].map(x=><div key={x[1]} style={{marginBottom:"12px"}}><div style={{fontSize:"11px",fontWeight:"bold",color:"#1A3A5C",marginBottom:"4px"}}>{x[0]} (R$)</div><input value={editVals[x[1]]||""} onChange={e=>{const val=e.target.value.replace(/[^0-9.,]/g,"");setEditVals(p=>({...p,[x[1]]:val}));}} style={sInp}/></div>)}
+          <div style={{display:"flex",gap:"8px"}}><button onClick={()=>setEditandoPreco(null)} style={{flex:1,padding:"11px",borderRadius:"10px",border:"1.5px solid #DDD",background:"#FFF",color:"#555",fontWeight:"bold",fontSize:"13px",cursor:"pointer"}}>Cancelar</button><button onClick={salvarPreco} style={{flex:1,padding:"11px",borderRadius:"10px",border:"none",background:"#1A3A5C",color:"#FFF",fontWeight:"bold",fontSize:"13px",cursor:"pointer"}}>Salvar</button></div>
+        </div>
+      </div>}
+
+      {/* Modal novo cliente */}
+      {modalNovo&&<div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.55)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:1000,padding:"16px"}}>
+        <div style={{background:"#FFF",borderRadius:"18px",padding:"24px",maxWidth:"380px",width:"100%",boxShadow:"0 24px 64px rgba(0,0,0,0.28)"}}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:"18px"}}><div style={{fontWeight:"bold",color:"#1A3A5C",fontSize:"17px"}}>➕ Novo Cliente</div><button onClick={()=>setModalNovo(false)} style={{background:"transparent",border:"none",fontSize:"20px",cursor:"pointer",color:"#6B7A8D"}}>✕</button></div>
+          <div style={{marginBottom:"14px"}}><div style={{fontSize:"11px",fontWeight:"bold",color:"#1A3A5C",marginBottom:"4px"}}>Nome</div><input value={novoC.nome} onChange={e=>setNovoC(p=>({...p,nome:e.target.value}))} placeholder="Nome do cliente" style={sInp} autoFocus/></div>
+          <div style={{marginBottom:"14px"}}><div style={{fontSize:"11px",fontWeight:"bold",color:"#1A3A5C",marginBottom:"4px"}}>Telefone / WhatsApp</div><input value={novoC.telefone} onChange={e=>setNovoC(p=>({...p,telefone:e.target.value}))} placeholder="(71) 99999-9999" type="tel" style={sInp}/></div>
+          <div style={{marginBottom:"22px"}}><div style={{fontSize:"11px",fontWeight:"bold",color:"#C8A84B",marginBottom:"4px"}}>🎁 Indicado por (opcional)</div><input value={novoC.indicadoPor} onChange={e=>setNovoC(p=>({...p,indicadoPor:e.target.value}))} placeholder="Nome de quem indicou..." style={{...sInp,borderColor:"rgba(200,168,75,0.35)",background:"#FFFDF0"}}/></div>
+          <div style={{display:"flex",gap:"8px"}}><button onClick={()=>setModalNovo(false)} style={{flex:1,padding:"11px",borderRadius:"10px",border:"1.5px solid #DDD",background:"#FFF",color:"#555",fontWeight:"bold",fontSize:"13px",cursor:"pointer"}}>Cancelar</button><button onClick={criarCliente} disabled={!novoC.nome.trim()&&!novoC.telefone.trim()} style={{flex:1,padding:"11px",borderRadius:"10px",border:"none",background:(novoC.nome.trim()||novoC.telefone.trim())?"#1A3A5C":"#CCC",color:"#FFF",fontWeight:"bold",fontSize:"13px",cursor:"pointer"}}>Adicionar</button></div>
+        </div>
+      </div>}
+
+      {/* Header */}
+      <div style={{background:"linear-gradient(90deg,#1A3A5C,#2A5280)",padding:"10px 14px",display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:"6px"}}>
+        <div style={{display:"flex",alignItems:"center",gap:"10px"}}>
+          <LogoBS size={40}/>
+          <div><div style={{color:"#FFF",fontWeight:"bold",fontSize:"14px"}}>GRUPO BS MÓVEIS</div><div style={{color:"#C8A84B",fontSize:"9px",fontWeight:"bold",letterSpacing:"1px",textTransform:"uppercase"}}>Sistema Completo de Vendas</div></div>
+        </div>
+        <div style={{display:"flex",gap:"5px",alignItems:"center",flexWrap:"wrap"}}>
+          {alertasCount>0&&<span style={{padding:"3px 8px",borderRadius:"20px",fontSize:"10px",fontWeight:"bold",background:"#FFEBEE",color:"#C62828"}}>🔔 {alertasCount}</span>}
+          <span style={{padding:"3px 8px",borderRadius:"20px",fontSize:"10px",fontWeight:"bold",background:syncBg,color:syncCor}}>{syncTxt}</span>
+          <span style={{padding:"3px 8px",borderRadius:"20px",fontSize:"10px",fontWeight:"bold",background:"rgba(200,168,75,0.12)",color:"#C8A84B"}}>👤 {user}</span>
+          <button onClick={logout} style={{padding:"3px 8px",borderRadius:"20px",fontSize:"10px",fontWeight:"bold",background:"rgba(255,255,255,0.12)",color:"rgba(255,255,255,0.7)",border:"none",cursor:"pointer"}}>Sair</button>
+        </div>
+      </div>
+
+      {/* Tabs */}
+      <div style={{background:"#FFF",padding:"6px 8px",boxShadow:"0 1px 6px rgba(0,0,0,0.07)",overflowX:"auto",whiteSpace:"nowrap"}}>
+        <div style={{display:"inline-flex",gap:"4px"}}>
+          {TABS.map(t=><button key={t[0]} onClick={()=>setTab(t[0])} style={{padding:"7px 12px",border:"none",borderRadius:"8px",background:tab===t[0]?"#1A3A5C":"transparent",color:tab===t[0]?"#FFF":"#6B7A8D",fontWeight:tab===t[0]?"bold":"600",fontSize:"11.5px",cursor:"pointer",whiteSpace:"nowrap"}}>{t[1]}</button>)}
+        </div>
+      </div>
+
+      {/* Conteúdo */}
+      <div style={{maxWidth:"720px",margin:"0 auto",padding:"14px 12px 80px"}}>
+
+        {/* ── CRM / FUNIL ── */}
+        {tab==="funil"&&<div>
+          <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:"8px",marginBottom:"14px"}}>
+            {[["👥","Total",clientes.length,"#EEF4FB","#1A3A5C"],["📋","Orçamentos",clientes.filter(c=>c.etapa==="orcamento").length,"#FFF3E0","#E65100"],["✅","Fechados",totalFechados,"#E8F5E9","#1B5E20"],["❌","Perdidos",clientes.filter(c=>c.etapa==="perdido").length,"#FFEBEE","#C62828"]].map(m=><div key={m[1]} style={{background:m[3],borderRadius:"12px",padding:"10px 6px",textAlign:"center"}}><div style={{fontSize:"18px"}}>{m[0]}</div><div style={{fontSize:"20px",fontWeight:"bold",color:m[4]}}>{m[2]}</div><div style={{fontSize:"9px",color:m[4],fontWeight:"bold",textTransform:"uppercase"}}>{m[1]}</div></div>)}
+          </div>
+          <div style={{display:"flex",gap:"8px",marginBottom:"8px"}}>
+            <input value={busca} onChange={e=>setBusca(e.target.value)} placeholder="🔍 Nome, tel, código..." style={{...sInp,flex:1}}/>
+            <button onClick={()=>setModoKanban(p=>!p)} style={{padding:"10px 13px",borderRadius:"10px",border:"1.5px solid "+(modoKanban?"#1A3A5C":"rgba(26,58,92,0.15)"),background:modoKanban?"#1A3A5C":"#FFF",color:modoKanban?"#FFF":"#1A3A5C",fontWeight:"bold",fontSize:"15px",cursor:"pointer"}}>{modoKanban?"☰":"🗂"}</button>
+            <button onClick={()=>setModalNovo(true)} style={{padding:"10px 16px",borderRadius:"10px",border:"none",background:"#1A3A5C",color:"#FFF",fontWeight:"bold",fontSize:"13px",cursor:"pointer",whiteSpace:"nowrap"}}>+ Novo</button>
+          </div>
+          {vendedores.length>1&&<div style={{display:"flex",gap:"6px",marginBottom:"10px",overflowX:"auto"}}>
+            <button onClick={()=>setFiltroVendedor("todos")} style={{padding:"4px 12px",borderRadius:"20px",border:"none",background:filtroVendedor==="todos"?"#1A3A5C":"#EEF4FB",color:filtroVendedor==="todos"?"#FFF":"#1A3A5C",fontSize:"11px",fontWeight:"bold",cursor:"pointer"}}>👥 Todos</button>
+            {vendedores.map(v=><button key={v} onClick={()=>setFiltroVendedor(v)} style={{padding:"4px 12px",borderRadius:"20px",border:"none",background:filtroVendedor===v?"#2A5280":"#EEF4FB",color:filtroVendedor===v?"#FFF":"#1A3A5C",fontSize:"11px",fontWeight:"bold",cursor:"pointer",whiteSpace:"nowrap"}}>👤 {v}</button>)}
+          </div>}
+          <div style={{overflowX:"auto",marginBottom:"12px"}}>
+            <div style={{display:"inline-flex",gap:"6px"}}>
+              <button onClick={()=>setFiltroEtapa("todos")} style={{padding:"5px 12px",borderRadius:"20px",border:"none",background:filtroEtapa==="todos"?"#1A3A5C":"#EEF4FB",color:filtroEtapa==="todos"?"#FFF":"#1A3A5C",fontSize:"11px",fontWeight:"bold",cursor:"pointer"}}>Todos ({clientes.length})</button>
+              {ETAPAS.map(e=>{const count=clientes.filter(c=>c.etapa===e.id).length;if(!count&&filtroEtapa!==e.id)return null;return(<button key={e.id} onClick={()=>setFiltroEtapa(e.id)} style={{padding:"5px 12px",borderRadius:"20px",border:"none",background:filtroEtapa===e.id?e.cor:e.bg,color:filtroEtapa===e.id?"#FFF":e.cor,fontSize:"11px",fontWeight:"bold",cursor:"pointer",whiteSpace:"nowrap"}}>{e.label} ({count})</button>);})}
+            </div>
+          </div>
+          {modoKanban&&<div style={{overflowX:"auto",margin:"0 -12px",padding:"4px 12px 20px"}}>
+            <div style={{display:"inline-flex",gap:"10px",alignItems:"flex-start",minWidth:"max-content"}}>
+              {ETAPAS.map(etapa=>{const col=cliFiltrados.filter(c=>c.etapa===etapa.id);return(
+                <div key={etapa.id} style={{width:"190px",flexShrink:0}}>
+                  <div style={{background:etapa.cor,borderRadius:"10px 10px 0 0",padding:"8px 10px",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                    <span style={{color:"#FFF",fontWeight:"bold",fontSize:"11px"}}>{etapa.label}</span>
+                    <span style={{background:"rgba(255,255,255,0.25)",color:"#FFF",borderRadius:"20px",padding:"1px 8px",fontSize:"11px",fontWeight:"bold"}}>{col.length}</span>
+                  </div>
+                  <div style={{background:etapa.bg,borderRadius:"0 0 10px 10px",padding:"8px",minHeight:"80px",maxHeight:"68vh",overflowY:"auto"}}>
+                    {col.length===0&&<div style={{textAlign:"center",color:"#AAA",fontSize:"11px",padding:"16px 0"}}>Vazio</div>}
+                    {col.map(cli=>{const tx=(cli.itens||[]).reduce((s,it)=>{const p=precos[it.tipo]&&precos[it.tipo][it.variante];return s+(p?toN(p.exe):0);},0);const alerta=!["fechado","entregue","posvenda","perdido"].includes(cli.etapa)&&diasSemContato(cli)>=3;return(<div key={cli.id} onClick={()=>setClienteSel(cli)} style={{background:"#FFF",borderRadius:"9px",padding:"10px",marginBottom:"6px",boxShadow:"0 1px 5px rgba(0,0,0,0.08)",cursor:"pointer",borderLeft:"3px solid "+etapa.cor}}>
+                      <div style={{fontWeight:"bold",fontSize:"12px",color:"#1C2B3A",marginBottom:"3px"}}>{nomeExib(cli)}</div>
+                      <div style={{display:"flex",gap:"3px",flexWrap:"wrap"}}>
+                        {tx>0&&<span style={{background:"#E3F2FD",color:"#1565C0",borderRadius:"5px",padding:"1px 5px",fontSize:"9px",fontWeight:"bold"}}>R${fBR(tx)}</span>}
+                        {alerta&&<span style={{background:"#FFEBEE",color:"#C62828",borderRadius:"5px",padding:"1px 5px",fontSize:"9px",fontWeight:"bold"}}>⚠️{diasSemContato(cli)}d</span>}
+                      </div>
+                    </div>);})}
+                  </div>
+                </div>
+              );})}
+            </div>
+          </div>}
+          {!modoKanban&&alertasCount>0&&<div style={{background:"#FFEBEE",borderRadius:"12px",padding:"10px 14px",marginBottom:"12px"}}><span style={{fontSize:"12px",fontWeight:"bold",color:"#C62828"}}>🔔 {alertasCount} cliente{alertasCount>1?"s":""} sem contato há 3+ dias</span></div>}
+          {!modoKanban&&cliFiltrados.length===0&&<div style={{textAlign:"center",padding:"40px",color:"#6B7A8D"}}><div style={{fontSize:"32px",marginBottom:"8px"}}>👥</div><div>Nenhum cliente cadastrado</div><button onClick={()=>setModalNovo(true)} style={{marginTop:"12px",padding:"10px 20px",borderRadius:"10px",border:"none",background:"#1A3A5C",color:"#FFF",fontWeight:"bold",fontSize:"13px",cursor:"pointer"}}>+ Cadastrar primeiro cliente</button></div>}
+          {!modoKanban&&cliFiltrados.map(cli=>{const ei=etapaInfo(cli.etapa);const tx=(cli.itens||[]).reduce((s,it)=>{const p=precos[it.tipo]&&precos[it.tipo][it.variante];return s+(p?toN(p.exe):0);},0);const alerta=!["fechado","entregue","posvenda","perdido"].includes(cli.etapa)&&diasSemContato(cli)>=3;return(<div key={cli.id} onClick={()=>setClienteSel(cli)} style={{background:"#FFF",borderRadius:"14px",padding:"16px",marginBottom:"10px",boxShadow:"0 2px 12px rgba(26,58,92,0.07)",cursor:"pointer",borderLeft:"4px solid "+(alerta?"#C62828":ei.cor)}}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:"8px"}}>
+              <div><div style={{fontWeight:"bold",color:"#1C2B3A",fontSize:"15px"}}>{nomeExib(cli)}</div>{cli.telefone&&<div style={{fontSize:"12px",color:"#6B7A8D"}}>📱 {cli.telefone}</div>}{cli.vendedor&&<div style={{fontSize:"11px",color:"#6B7A8D"}}>👤 {cli.vendedor}</div>}</div>
+              <span style={{background:ei.bg,color:ei.cor,borderRadius:"20px",padding:"4px 10px",fontSize:"10px",fontWeight:"bold",marginLeft:"8px",whiteSpace:"nowrap"}}>{ei.label}</span>
+            </div>
+            <div style={{display:"flex",gap:"8px",flexWrap:"wrap"}}>
+              {tx>0&&<span style={{background:"#E3F2FD",color:"#1565C0",borderRadius:"6px",padding:"3px 9px",fontSize:"11px",fontWeight:"bold"}}>⭐ R$ {fBR(tx)}</span>}
+              {(cli.itens||[]).length>0&&<span style={{fontSize:"11px",color:"#6B7A8D"}}>📋 {cli.itens.length} itens</span>}
+              {alerta&&<span style={{background:"#FFEBEE",color:"#C62828",borderRadius:"6px",padding:"2px 8px",fontSize:"10px",fontWeight:"bold"}}>⚠️ {diasSemContato(cli)}d</span>}
+            </div>
+          </div>);})}
+        </div>}
+
+        {/* ── PRODUÇÃO ── */}
+        {tab==="producao"&&<div>
+          {SPRODS.map(sp=>{const cols=clientes.filter(c=>(c.statusProducao||"aguardando")===sp.id&&!["entregue","posvenda"].includes(c.etapa));return(<div key={sp.id} style={sCard}><div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:"10px"}}><div style={{fontWeight:"bold",color:sp.cor,fontSize:"13px"}}>{sp.label}</div><span style={{background:sp.bg,color:sp.cor,borderRadius:"20px",padding:"2px 10px",fontSize:"11px",fontWeight:"bold"}}>{cols.length}</span></div>
+            {cols.length===0?<div style={{color:"#6B7A8D",fontSize:"12px"}}>Nenhum em produção</div>
+            :cols.map(c=>{const tx=(c.itens||[]).reduce((s,it)=>{const p=precos[it.tipo]&&precos[it.tipo][it.variante];return s+(p?toN(p.exe):0);},0);return(<div key={c.id} onClick={()=>setClienteSel(c)} style={{padding:"10px 0",borderTop:"1px solid rgba(26,58,92,0.10)",cursor:"pointer"}}>
+              <div style={{fontWeight:"bold",color:"#1C2B3A",fontSize:"13px"}}>{nomeExib(c)}</div>
+              {(c.itens||[]).length>0&&<div style={{fontSize:"11px",color:"#6B7A8D"}}>{c.itens.map(it=>it.tipo).join(" · ")}</div>}
+              {tx>0&&<div style={{fontSize:"11px",fontWeight:"bold",color:"#1565C0",marginTop:"2px"}}>R$ {fBR(tx)}</div>}
+            </div>);})}
+          </div>);})}
+        </div>}
+
+        {/* ── FINANCEIRO ── */}
+        {tab==="financeiro"&&(()=>{
+          const cliMes=clientes.filter(c=>{if(!["fechado","entregue","posvenda"].includes(c.etapa))return false;const d=new Date(c.atualizadoEm||c.criadoEm||Date.now());return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")===mesAtual();});
+          const fatBruto=cliMes.reduce((s,c)=>{const pl=c.planoEscolhido==="ess"?(c.itens||[]).reduce((x,it)=>{const p=precos[it.tipo]&&precos[it.tipo][it.variante];return x+(p?toN(p.ess):0);},0):c.planoEscolhido==="pre"?(c.itens||[]).reduce((x,it)=>{const p=precos[it.tipo]&&precos[it.tipo][it.variante];return x+(p?toN(p.pre):0);},0):(c.itens||[]).reduce((x,it)=>{const p=precos[it.tipo]&&precos[it.tipo][it.variante];return x+(p?toN(p.exe):0);},0);return s+pl;},0);
+          const recebido=cliMes.reduce((s,c)=>s+toN(c.entradaPaga)+toN(c.saldoPago),0);
+          return(<div>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:"10px",marginBottom:"14px"}}>
+              {[["💰","Faturamento",fBR(fatBruto),"#EEF4FB","#1A3A5C"],["✅","Recebido",fBR(recebido),"#E8F5E9","#1B5E20"],["📋","Fechamentos",cliMes.length,"#FFF3E0","#E65100"]].map(m=><div key={m[1]} style={{background:m[3],borderRadius:"14px",padding:"14px 10px",textAlign:"center"}}><div style={{fontSize:"20px"}}>{m[0]}</div><div style={{fontSize:"16px",fontWeight:"bold",color:m[4],marginTop:"4px"}}>{"R$ "+m[2]}</div><div style={{fontSize:"9px",color:m[4],fontWeight:"bold",textTransform:"uppercase"}}>{m[1]}</div></div>)}
+            </div>
+            <div style={sCard}><div style={{fontWeight:"bold",color:"#1A3A5C",fontSize:"13px",marginBottom:"12px"}}>💰 Fechamentos do mês</div>
+              {cliMes.length===0?<div style={{color:"#6B7A8D",fontSize:"12px"}}>Nenhum fechamento este mês.</div>
+              :cliMes.map(c=>{const val=(c.itens||[]).reduce((s,it)=>{const p=precos[it.tipo]&&precos[it.tipo][it.variante];return s+(p?toN(p.exe):0);},0);const rec=toN(c.entradaPaga)+toN(c.saldoPago);return(<div key={c.id} style={{padding:"10px 0",borderTop:"1px solid rgba(26,58,92,0.10)"}}><div style={{display:"flex",justifyContent:"space-between"}}><div style={{fontWeight:"bold",color:"#1C2B3A",fontSize:"13px"}}>{nomeExib(c)}</div><div style={{fontWeight:"bold",color:"#1A3A5C"}}>R$ {fBR(val)}</div></div><div style={{display:"flex",justifyContent:"space-between",marginTop:"2px"}}><span style={{fontSize:"11px",color:"#6B7A8D"}}>{c.vendedor||"—"}</span><span style={{fontSize:"11px",color:rec>=val?"#1B5E20":"#C62828",fontWeight:"600"}}>Rec: R$ {fBR(rec)}</span></div></div>);})}
+            </div>
+          </div>);
+        })()}
+
+        {/* ── DASHBOARD ── */}
+        {tab==="dashboard"&&<div>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"10px",marginBottom:"14px"}}>
+            {[["👥","Total clientes",clientes.length,"#EEF4FB","#1A3A5C"],["✅","Taxa conversão",taxaConv.toFixed(0)+"%","#E8F5E9","#1B5E20"],["📋","Fechados",totalFechados,"#FFF3E0","#E65100"],["❌","Perdidos",clientes.filter(c=>c.etapa==="perdido").length,"#FFEBEE","#C62828"]].map(m=><div key={m[1]} style={{background:m[3],borderRadius:"14px",padding:"14px 12px",textAlign:"center"}}><div style={{fontSize:"22px"}}>{m[0]}</div><div style={{fontSize:"22px",fontWeight:"bold",color:m[4],marginTop:"4px"}}>{m[2]}</div><div style={{fontSize:"10px",color:m[4],fontWeight:"bold",textTransform:"uppercase",marginTop:"2px"}}>{m[1]}</div></div>)}
+          </div>
+          <div style={{...sCard,marginBottom:"12px"}}>
+            <div style={{fontWeight:"bold",color:"#1A3A5C",fontSize:"13px",marginBottom:"4px"}}>📈 Faturamento — últimos 6 meses</div>
+            <div style={{fontSize:"11px",color:"#6B7A8D",marginBottom:"14px"}}>Total: R$ {fBR(meses6.reduce((s,m)=>s+m.total,0))} · {meses6.reduce((s,m)=>s+m.count,0)} fechamentos</div>
+            {maxBar===0?<div style={{textAlign:"center",color:"#6B7A8D",fontSize:"12px",padding:"20px 0"}}>Nenhum fechamento registrado ainda.</div>
+            :<ResponsiveContainer width="100%" height={180}>
+              <BarChart data={meses6} barSize={32} margin={{top:4,right:4,left:0,bottom:0}}>
+                <XAxis dataKey="label" tick={{fontSize:11,fill:"#6B7A8D"}} axisLine={false} tickLine={false}/>
+                <YAxis hide={true} domain={[0,maxBar*1.15]}/>
+                <Tooltip content={<CustomTooltip/>} cursor={{fill:"rgba(26,58,92,0.06)"}}/>
+                <Bar dataKey="total" radius={[6,6,0,0]}>
+                  {meses6.map((entry,index)=><Cell key={index} fill={CORES_BAR[index]||"#1A3A5C"}/>)}
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>}
+          </div>
+          <div style={{...sCard,marginBottom:"12px"}}>
+            <div style={{fontWeight:"bold",color:"#1A3A5C",fontSize:"13px",marginBottom:"12px"}}>🎯 Planos escolhidos</div>
+            {[["🔵 Essencial",planos.ess,"#37474F","#ECEFF1"],["⭐ Executivo",planos.exe,"#1565C0","#E3F2FD"],["💎 Premium",planos.pre,"#6A1B9A","#F3E5F5"]].map(x=>{const tot=Object.values(planos).reduce((a,b)=>a+b,0)||1;const pct=(x[1]/tot*100);return(<div key={x[0]} style={{marginBottom:"10px"}}><div style={{display:"flex",justifyContent:"space-between",fontSize:"12px",marginBottom:"4px"}}><span style={{fontWeight:"bold",color:x[2]}}>{x[0]}</span><span style={{color:"#6B7A8D"}}>{x[1]} — {pct.toFixed(0)}%</span></div><div style={{height:"10px",borderRadius:"5px",background:"#EEE",overflow:"hidden"}}><div style={{height:"100%",borderRadius:"5px",background:x[2],width:pct+"%"}}/></div></div>);})}
+          </div>
+        </div>}
+
+        {/* ── ORÇAMENTO ── */}
+        {tab==="orcamento"&&<div>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:"10px"}}>
+            <span style={{fontWeight:"bold",color:"#1A3A5C",fontSize:"13px"}}>{itensOrc.length} {itensOrc.length===1?"item":"itens"}</span>
+            {itensOrc.length>1&&<button onClick={()=>setItensOrc([novoItem()])} style={{background:"#FFEBEE",border:"none",color:"#C62828",borderRadius:"8px",padding:"5px 12px",cursor:"pointer",fontSize:"12px",fontWeight:"bold"}}>🗑 Limpar</button>}
+          </div>
+          {itensOrc.map((it,i)=><ItemCard key={it.id} item={it} idx={i} total={itensOrc.length} precos={precos} onUpdate={updItemOrc} onRemove={rmItemOrc}/>)}
+          <button onClick={addItemOrc} style={{width:"100%",padding:"12px",borderRadius:"10px",border:"2px dashed #2A5280",background:"transparent",color:"#1A3A5C",fontWeight:"bold",fontSize:"13px",cursor:"pointer",marginBottom:"12px"}}>+ Adicionar item</button>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:"8px",marginBottom:"12px"}}>
+            {[["🔵",itensOrc.reduce((s,it)=>{const p=precos[it.tipo]&&precos[it.tipo][it.variante];if(!p)return s;const v=it.overEss!==""&&it.overEss!==undefined?toN(it.overEss):toN(p.ess);return s+v;},0),"#ECEFF1","#37474F"],["⭐",itensOrc.reduce((s,it)=>{const p=precos[it.tipo]&&precos[it.tipo][it.variante];if(!p)return s;const v=it.overExe!==""&&it.overExe!==undefined?toN(it.overExe):toN(p.exe);return s+v;},0),"#E3F2FD","#1565C0"],["💎",itensOrc.reduce((s,it)=>{const p=precos[it.tipo]&&precos[it.tipo][it.variante];if(!p)return s;const v=it.overPre!==""&&it.overPre!==undefined?toN(it.overPre):toN(p.pre);return s+v;},0),"#F3E5F5","#6A1B9A"]].map(x=><div key={x[0]} style={{background:x[2],borderRadius:"10px",padding:"10px",textAlign:"center"}}><div style={{fontSize:"16px"}}>{x[0]}</div><div style={{fontSize:"15px",fontWeight:"bold",color:x[3]}}>R$ {fBR(x[1])}</div><div style={{fontSize:"10px",color:x[3]}}>10x {parc(x[1])}</div></div>)}
+          </div>
+          <div style={{display:"flex",gap:"8px",marginBottom:"8px"}}>
+            <button onClick={copiarOrc} style={{flex:1,padding:"13px",borderRadius:"12px",border:"none",background:copiadoOrc?"#1B5E20":"#1A3A5C",color:"#FFF",fontWeight:"bold",fontSize:"14px",cursor:"pointer"}}>{copiadoOrc?"✅ Copiado!":"📋 Copiar"}</button>
+            <a href={waUrlOrc} target="_blank" rel="noopener noreferrer" style={{flex:1,padding:"13px",borderRadius:"12px",background:"#25D366",color:"#FFF",fontWeight:"bold",fontSize:"14px",textAlign:"center",textDecoration:"none",display:"flex",alignItems:"center",justifyContent:"center"}}>📲 WhatsApp</a>
+          </div>
+          <button onClick={baixarOrc} style={{width:"100%",padding:"12px",borderRadius:"12px",border:"1.5px solid #1A3A5C",background:"#EEF4FB",color:"#1A3A5C",fontWeight:"bold",fontSize:"13px",cursor:"pointer"}}>⬇️ Baixar orçamento (.txt)</button>
+        </div>}
+
+        {/* ── OBJEÇÕES ── */}
+        {tab==="objecoes"&&<div>
+          <div style={{fontSize:"12px",color:"#6B7A8D",marginBottom:"12px",textAlign:"center",fontWeight:"bold"}}>Toque para copiar a resposta 📋</div>
+          {OBJECOES.map((o,i)=><div key={i} onClick={()=>{setObjecaoCop(i);if(navigator.clipboard&&navigator.clipboard.writeText)navigator.clipboard.writeText(o.resp).catch(()=>{});setTimeout(()=>setObjecaoCop(null),2500);}} style={{background:"#FFF",borderRadius:"14px",padding:"16px",marginBottom:"10px",boxShadow:"0 2px 10px rgba(26,58,92,0.07)",cursor:"pointer",borderLeft:"4px solid "+(objecaoCop===i?"#1B5E20":"#1A3A5C")}}><div style={{fontWeight:"bold",color:"#1A3A5C",fontSize:"13px",marginBottom:"8px"}}>❓ {o.obj}</div><div style={{fontSize:"12.5px",color:"#6B7A8D",whiteSpace:"pre-wrap",lineHeight:"1.65"}}>{o.resp}</div><div style={{marginTop:"8px",fontSize:"11px",color:objecaoCop===i?"#1B5E20":"#CCC",fontWeight:"bold"}}>{objecaoCop===i?"✅ Copiado!":"Toque para copiar"}</div></div>)}
+        </div>}
+
+        {/* ── PÓS-VENDA ── */}
+        {tab==="posvenda"&&<div>
+          {SCRIPTS_POS.map((s,i)=>{const k="ps-"+i;return(<div key={i} style={sCard}><div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:"10px"}}><div style={{fontWeight:"bold",color:"#1A3A5C",fontSize:"13px"}}>⭐ {s.label}</div><button onClick={()=>{if(navigator.clipboard&&navigator.clipboard.writeText)navigator.clipboard.writeText(s.texto).catch(()=>{});setObjecaoCop(k);setTimeout(()=>setObjecaoCop(null),2500);}} style={{padding:"6px 12px",borderRadius:"8px",border:"none",background:objecaoCop===k?"#1B5E20":"#25D366",color:"#FFF",fontWeight:"bold",fontSize:"11px",cursor:"pointer"}}>{objecaoCop===k?"✅ Copiado":"📋 Copiar"}</button></div><div style={{background:"#F9F9F9",borderRadius:"8px",padding:"12px",fontSize:"12px",color:"#333",whiteSpace:"pre-wrap",lineHeight:"1.7",border:"1px solid #EEE"}}>{s.texto}</div></div>);})}
+        </div>}
+
+        {/* ── ARIA IA ── */}
+        {tab==="ia"&&<div style={{display:"flex",flexDirection:"column",height:"calc(100vh - 200px)",minHeight:"400px"}}>
+          <div style={{flex:1,overflowY:"auto",marginBottom:"10px",display:"flex",flexDirection:"column",gap:"10px"}}>
+            {iaMsgs.length===0&&<div style={{textAlign:"center",padding:"24px 16px",color:"#6B7A8D"}}>
+              <div style={{fontSize:"36px",marginBottom:"10px"}}>🤖</div>
+              <div style={{fontWeight:"bold",color:"#1A3A5C",fontSize:"15px",marginBottom:"8px"}}>Olá! Sou a ARIA</div>
+              <div style={{fontSize:"12px",lineHeight:"1.6",marginBottom:"14px"}}>Especialista em vendas de estofados. Conheço todos os preços e clientes da BS Móveis.</div>
+              <div style={{background:"#FFF8E7",borderRadius:"10px",padding:"12px",fontSize:"11px",color:"#856404",marginBottom:"14px"}}>⚠️ Para usar a ARIA, configure sua chave da API Anthropic no código (variável ANTHROPIC_API_KEY).</div>
+              {["Quais clientes devo priorizar hoje?","Script para fechar cliente em negociação","Como responder objeção de preço?"].map(s=><button key={s} onClick={()=>setIaInput(s)} style={{display:"block",width:"100%",background:"#EEF4FB",border:"1px solid rgba(26,58,92,0.10)",borderRadius:"10px",padding:"9px 14px",fontSize:"12px",color:"#1A3A5C",fontWeight:"bold",cursor:"pointer",textAlign:"left",marginBottom:"6px"}}>💬 {s}</button>)}
+            </div>}
+            {iaMsgs.map((m,i)=><div key={i} style={{display:"flex",justifyContent:m.role==="user"?"flex-end":"flex-start"}}><div style={{maxWidth:"82%",padding:"10px 14px",borderRadius:m.role==="user"?"14px 14px 4px 14px":"14px 14px 14px 4px",background:m.role==="user"?"#1A3A5C":"#FFF",color:m.role==="user"?"#FFF":"#1C2B3A",fontSize:"13px",lineHeight:"1.6",boxShadow:"0 2px 8px rgba(0,0,0,0.08)",whiteSpace:"pre-wrap",wordBreak:"break-word"}}>{m.content}</div></div>)}
+            {iaLoading&&<div style={{display:"flex",alignItems:"center",gap:"8px"}}><div style={{background:"#FFF",borderRadius:"14px 14px 14px 4px",padding:"12px 16px",boxShadow:"0 2px 8px rgba(0,0,0,0.08)",color:"#6B7A8D",fontSize:"12px"}}>✍️ Pensando...</div></div>}
+            <div ref={iaBottomRef}/>
+          </div>
+          <div style={{display:"flex",gap:"8px",alignItems:"flex-end"}}>
+            <textarea value={iaInput} onChange={e=>setIaInput(e.target.value)} onKeyDown={e=>{if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();enviarIA();}}} placeholder="Pergunte... (Enter envia)" style={{...sInp,flex:1,minHeight:"44px",maxHeight:"120px",resize:"none",lineHeight:"1.5"}} rows={1}/>
+            <button onClick={enviarIA} disabled={iaLoading||!iaInput.trim()} style={{padding:"11px 16px",borderRadius:"10px",border:"none",background:(iaLoading||!iaInput.trim())?"#CCC":"#1A3A5C",color:"#FFF",fontWeight:"bold",fontSize:"14px",cursor:(iaLoading||!iaInput.trim())?"default":"pointer"}}>{iaLoading?"⏳":"➤"}</button>
+          </div>
+        </div>}
+
+        {/* ── CONFIG ── */}
+        {tab==="config"&&<div>
+          <div style={{display:"flex",gap:"6px",marginBottom:"14px",overflowX:"auto"}}>
+            {[["backup","💾 Backup"],["empresa","🏢 Empresa"],["precos","💰 Preços"],["tecidos","🧵 Tecidos"],["metas","🎯 Metas"],["objecoes","🤝 Objeções"],["log","📋 Log"]].map(x=><button key={x[0]} onClick={()=>setSecaoConfig(x[0])} style={{padding:"5px 12px",borderRadius:"20px",border:"none",background:secaoConfig===x[0]?"#1A3A5C":"#EEF4FB",color:secaoConfig===x[0]?"#FFF":"#1A3A5C",fontSize:"11px",fontWeight:"bold",cursor:"pointer",whiteSpace:"nowrap"}}>{x[1]}</button>)}
+          </div>
+
+          {secaoConfig==="backup"&&<div>
+            <div style={{background:"#FFF8E7",borderRadius:"12px",padding:"14px",marginBottom:"14px",border:"1px solid #FFE082"}}>
+              <div style={{fontWeight:"bold",color:"#F57F17",fontSize:"13px",marginBottom:"4px"}}>⚠️ Dados salvos localmente (localStorage)</div>
+              <div style={{fontSize:"12px",color:"#5D4037",lineHeight:"1.6"}}>Faça backup regularmente para não perder dados!</div>
+            </div>
+            <div style={sCard}>
+              <div style={{fontWeight:"bold",color:"#1A3A5C",fontSize:"13px",marginBottom:"4px"}}>📊 Volume atual</div>
+              <div style={{fontSize:"12px",color:"#6B7A8D",marginBottom:"16px"}}>{clientes.length} clientes · {tecidos.length} tecidos · ~{Math.round(JSON.stringify({precos,clientes,tecidos,metas}).length/1024)} KB</div>
+              <button onClick={exportarJSON} style={{width:"100%",padding:"14px",borderRadius:"12px",border:"none",background:"#1A3A5C",color:"#FFF",fontWeight:"bold",fontSize:"14px",cursor:"pointer",marginBottom:"8px"}}>⬇️ Baixar backup .json</button>
+              <button onClick={copiarJSON} style={{width:"100%",padding:"11px",borderRadius:"10px",border:"1.5px solid #1A3A5C",background:exportCopiado?"#E8F5E9":"#FFF",color:exportCopiado?"#1B5E20":"#1A3A5C",fontWeight:"bold",fontSize:"13px",cursor:"pointer"}}>
+                {exportCopiado?"✅ Copiado!":"📋 Ver / Copiar JSON"}
+              </button>
+              {showJsonArea&&<div style={{marginTop:"10px"}}>
+                <textarea readOnly value={jsonText} onClick={e=>e.target.select()} style={{width:"100%",height:"140px",borderRadius:"10px",border:"1.5px solid #1A3A5C",padding:"10px",fontSize:"11px",fontFamily:"monospace",background:"#F7F9FC",boxSizing:"border-box",resize:"none"}}/>
+                <button onClick={()=>setShowJsonArea(false)} style={{width:"100%",marginTop:"6px",padding:"8px",borderRadius:"8px",border:"1px solid #DDD",background:"#FFF",color:"#888",fontSize:"11px",cursor:"pointer"}}>Fechar</button>
+              </div>}
+            </div>
+            <div style={sCard}>
+              <div style={{fontWeight:"bold",color:"#1A3A5C",fontSize:"13px",marginBottom:"6px"}}>📁 Restaurar backup</div>
+              <div style={{fontSize:"12px",color:"#C62828",fontWeight:"bold",marginBottom:"12px"}}>⚠️ Substituirá TODOS os dados atuais!</div>
+              {!pendingImport&&<input type="file" accept=".json" onChange={importarJSON} style={{width:"100%",padding:"8px",borderRadius:"8px",border:"1.5px solid #1A3A5C",background:"#FFF",fontSize:"13px",cursor:"pointer",boxSizing:"border-box"}}/>}
+              {pendingImport&&<div style={{borderRadius:"12px",border:"2px solid #C62828",background:"#FFEBEE",padding:"16px"}}>
+                <div style={{fontSize:"12px",color:"#5D4037",marginBottom:"12px"}}>Arquivo com {(pendingImport.clientes||[]).length} clientes · exportado em {pendingImport.exportadoEm?new Date(pendingImport.exportadoEm).toLocaleDateString("pt-BR"):"?"}</div>
+                <div style={{display:"flex",gap:"8px"}}>
+                  <button onClick={()=>setPendingImport(null)} style={{flex:1,padding:"11px",borderRadius:"10px",border:"1.5px solid #DDD",background:"#FFF",color:"#555",fontWeight:"bold",fontSize:"13px",cursor:"pointer"}}>Cancelar</button>
+                  <button onClick={confirmarImport} style={{flex:1,padding:"11px",borderRadius:"10px",border:"none",background:"#C62828",color:"#FFF",fontWeight:"bold",fontSize:"13px",cursor:"pointer"}}>✅ Confirmar</button>
+                </div>
+              </div>}
+              {importStatus==="ok"&&<div style={{marginTop:"10px",padding:"12px",background:"#E8F5E9",borderRadius:"10px",textAlign:"center",fontWeight:"bold",color:"#1B5E20"}}>✅ Dados restaurados!</div>}
+              {importStatus==="erro"&&<div style={{marginTop:"10px",padding:"12px",background:"#FFEBEE",borderRadius:"10px",textAlign:"center",fontWeight:"bold",color:"#C62828"}}>❌ Arquivo inválido.</div>}
+            </div>
+          </div>}
+
+          {secaoConfig==="empresa"&&<div>
+            <div style={sCard}>
+              <div style={{fontWeight:"bold",color:"#1A3A5C",fontSize:"13px",marginBottom:"14px"}}>🏢 Dados da Empresa</div>
+              {[["Nome da empresa","nome","BS Móveis Estofados"],["WhatsApp (DDD + número)","whatsapp","71985039240"],["Cidade(s) de atendimento","cidade","Salvador e Lauro de Freitas"]].map(f=><div key={f[1]} style={{marginBottom:"12px"}}><div style={{fontSize:"11px",fontWeight:"bold",color:"#1A3A5C",marginBottom:"4px",textTransform:"uppercase"}}>{f[0]}</div><input value={draftEmp[f[1]]||""} onChange={e=>{const v=e.target.value;setDraftEmp(p=>({...p,[f[1]]:v}));}} placeholder={f[2]} style={sInp}/></div>)}
+              <div style={{marginBottom:"14px"}}><div style={{fontSize:"11px",fontWeight:"bold",color:"#1A3A5C",marginBottom:"4px"}}>Saudação nas mensagens</div><textarea value={draftEmp.saudacao||""} onChange={e=>{const v=e.target.value;setDraftEmp(p=>({...p,saudacao:v}));}} rows={2} style={{...sInp,resize:"none",lineHeight:"1.5"}}/></div>
+              <button onClick={salvarEmp} style={{width:"100%",padding:"12px",borderRadius:"10px",border:"none",background:empSalvo?"#1B5E20":"#1A3A5C",color:"#FFF",fontWeight:"bold",fontSize:"13px",cursor:"pointer"}}>{empSalvo?"✅ Salvo!":"💾 Salvar configurações"}</button>
+            </div>
+          </div>}
+
+          {secaoConfig==="precos"&&<div>
+            <div style={{fontSize:"12px",color:"#6B7A8D",marginBottom:"12px"}}>⚠️ Edite os preços para personalizar os orçamentos.</div>
+            {TIPOS.map(tipo=><div key={tipo} style={sCard}><div style={{fontWeight:"bold",color:"#1A3A5C",fontSize:"13px",marginBottom:"8px"}}>{tipo}</div>
+              {Object.entries(precos[tipo]||{}).map(([variante,vals])=><div key={variante} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"8px 0",borderTop:"1px solid rgba(26,58,92,0.10)"}}><div style={{flex:1}}><div style={{fontSize:"12px",fontWeight:"bold",color:"#1C2B3A"}}>{variante}</div><div style={{fontSize:"11px",color:"#6B7A8D"}}>Ess R${vals.ess} · Exe R${vals.exe} · Pre R${vals.pre}</div></div><button onClick={()=>{setEditandoPreco({tipo,variante});setEditVals({ess:vals.ess,exe:vals.exe,pre:vals.pre});}} style={{padding:"5px 12px",borderRadius:"8px",border:"1.5px solid #1A3A5C",background:"#FFF",color:"#1A3A5C",fontSize:"12px",fontWeight:"bold",cursor:"pointer"}}>✏️</button></div>)}
+            </div>)}
+            <button onClick={()=>{if(window.confirm("Resetar todos os preços para o padrão?"))salvarTudo(PRECOS_ORIG,null,null,null,"Resetou preços");}} style={{width:"100%",padding:"11px",borderRadius:"10px",border:"1.5px solid #C62828",background:"#FFEBEE",color:"#C62828",fontWeight:"bold",fontSize:"13px",cursor:"pointer"}}>↩️ Resetar todos os preços</button>
+          </div>}
+
+          {secaoConfig==="tecidos"&&<div>
+            <div style={sCard}>
+              <div style={{fontWeight:"bold",color:"#1A3A5C",fontSize:"13px",marginBottom:"12px"}}>➕ Adicionar tecido</div>
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"10px",marginBottom:"10px"}}>
+                {[["Nome","nome","Veludo Inca"],["Cor","cor","Cinza"],["Metros","metros","0"],["Mín.","minimo","2"]].map(f=><div key={f[1]}><div style={{fontSize:"11px",fontWeight:"bold",color:"#1A3A5C",marginBottom:"3px"}}>{f[0]}</div><input value={novoTecido[f[1]]} onChange={e=>{const v=e.target.value;setNovoTecido(p=>({...p,[f[1]]:v}));}} placeholder={f[2]} style={sInp}/></div>)}
+              </div>
+              <div style={{marginBottom:"12px"}}><select value={novoTecido.plano} onChange={e=>{const v=e.target.value;setNovoTecido(p=>({...p,plano:v}));}} style={sInp}><option value="ess">🔵 Essencial</option><option value="exe">⭐ Executivo</option><option value="pre">💎 Premium</option></select></div>
+              <button onClick={()=>{if(!novoTecido.nome.trim())return;salvarTudo(null,null,[...tecidos,{id:Math.random(),...novoTecido}],null,"Adicionou tecido: "+novoTecido.nome);setNovoTecido({nome:"",cor:"",metros:"0",minimo:"2",plano:"exe"});}} style={{width:"100%",padding:"11px",borderRadius:"10px",border:"none",background:"#1A3A5C",color:"#FFF",fontWeight:"bold",fontSize:"13px",cursor:"pointer"}}>+ Adicionar</button>
+            </div>
+            {tecidos.map(t=>{const baixo=toN(t.metros)<=toN(t.minimo);return(<div key={t.id} style={{...sCard,borderLeft:"4px solid "+(baixo?"#C62828":"#1B5E20")}}>
+              <div style={{display:"flex",justifyContent:"space-between",marginBottom:"8px"}}><div><div style={{fontWeight:"bold",color:"#1C2B3A"}}>{t.nome}{t.cor?" — "+t.cor:""}</div><div style={{fontSize:"11px",color:"#6B7A8D"}}>{{ess:"🔵 Essencial",exe:"⭐ Executivo",pre:"💎 Premium"}[t.plano]}</div></div><button onClick={()=>salvarTudo(null,null,tecidos.filter(x=>x.id!==t.id),null,"Removeu tecido")} style={{background:"#FFEBEE",border:"none",color:"#C62828",borderRadius:"8px",padding:"4px 10px",cursor:"pointer",fontSize:"12px",fontWeight:"bold"}}>✕</button></div>
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"10px"}}>
+                <div><div style={{fontSize:"11px",fontWeight:"bold",color:"#1A3A5C",marginBottom:"3px"}}>Metros</div><input value={t.metros} onChange={e=>{const v=e.target.value.replace(/[^0-9.,]/g,"");salvarTudo(null,null,tecidos.map(x=>x.id===t.id?{...x,metros:v}:x),null,"Estoque");}} style={{...sInp,textAlign:"center",fontWeight:"bold",background:baixo?"#FFEBEE":"#F7F9FC",color:baixo?"#C62828":"#1C2B3A"}}/></div>
+                <div><div style={{fontSize:"11px",fontWeight:"bold",color:"#1A3A5C",marginBottom:"3px"}}>Mín.</div><input value={t.minimo} onChange={e=>{const v=e.target.value.replace(/[^0-9.,]/g,"");salvarTudo(null,null,tecidos.map(x=>x.id===t.id?{...x,minimo:v}:x),null,"Mínimo");}} style={{...sInp,textAlign:"center"}}/></div>
+              </div>
+              {baixo&&<div style={{marginTop:"8px",fontSize:"11px",color:"#C62828",fontWeight:"bold",background:"#FFEBEE",borderRadius:"8px",padding:"5px 10px"}}>⚠️ Estoque abaixo do mínimo!</div>}
+            </div>);})}
+          </div>}
+
+          {secaoConfig==="metas"&&<div>
+            <div style={sCard}>
+              <div style={{fontWeight:"bold",color:"#1A3A5C",fontSize:"13px",marginBottom:"12px"}}>➕ Definir meta</div>
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"10px",marginBottom:"10px"}}>
+                <div><div style={{fontSize:"11px",fontWeight:"bold",color:"#1A3A5C",marginBottom:"3px"}}>Vendedor</div><input value={novaMeta.vendedor} onChange={e=>{const v=e.target.value;setNovaMeta(p=>({...p,vendedor:v}));}} placeholder="Nome" style={sInp}/></div>
+                <div><div style={{fontSize:"11px",fontWeight:"bold",color:"#1A3A5C",marginBottom:"3px"}}>Mês</div><input type="month" value={novaMeta.mes} onChange={e=>{const v=e.target.value;setNovaMeta(p=>({...p,mes:v}));}} style={sInp}/></div>
+                <div><div style={{fontSize:"11px",fontWeight:"bold",color:"#1A3A5C",marginBottom:"3px"}}>Meta (R$)</div><input value={novaMeta.meta} onChange={e=>{const v=e.target.value.replace(/[^0-9.,]/g,"");setNovaMeta(p=>({...p,meta:v}));}} placeholder="15000" style={sInp}/></div>
+                <div><div style={{fontSize:"11px",fontWeight:"bold",color:"#1A3A5C",marginBottom:"3px"}}>Comissão (%)</div><input value={novaMeta.comissaoPct} onChange={e=>{const v=e.target.value.replace(/[^0-9.,]/g,"");setNovaMeta(p=>({...p,comissaoPct:v}));}} placeholder="5" style={sInp}/></div>
+              </div>
+              <button onClick={()=>{if(!novaMeta.vendedor.trim())return;const nm=metas.filter(m=>!(m.vendedor===novaMeta.vendedor&&m.mes===novaMeta.mes)).concat([{id:Math.random(),...novaMeta}]);salvarTudo(null,null,null,nm,"Atualizou metas");setNovaMeta({vendedor:"",meta:"0",comissaoPct:"5",mes:mesAtual()});}} style={{width:"100%",padding:"11px",borderRadius:"10px",border:"none",background:"#1A3A5C",color:"#FFF",fontWeight:"bold",fontSize:"13px",cursor:"pointer"}}>+ Salvar meta</button>
+            </div>
+            {metas.sort((a,b)=>b.mes.localeCompare(a.mes)).map(m=><div key={m.id} style={{...sCard,borderLeft:"4px solid #C8A84B"}}><div style={{display:"flex",justifyContent:"space-between"}}><div><div style={{fontWeight:"bold",color:"#1C2B3A"}}>{m.vendedor}</div><div style={{fontSize:"12px",color:"#6B7A8D"}}>{m.mes} · Meta: R$ {fBR(toN(m.meta))} · {m.comissaoPct}%</div></div><button onClick={()=>salvarTudo(null,null,null,metas.filter(x=>x.id!==m.id),null,"Removeu meta")} style={{background:"#FFEBEE",border:"none",color:"#C62828",borderRadius:"8px",padding:"4px 10px",cursor:"pointer",fontSize:"12px",fontWeight:"bold"}}>✕</button></div></div>)}
+          </div>}
+
+          {secaoConfig==="objecoes"&&<div>
+            <div style={{fontSize:"12px",color:"#6B7A8D",marginBottom:"12px",textAlign:"center"}}>Toque para copiar 📋</div>
+            {OBJECOES.map((o,i)=><div key={i} onClick={()=>{setObjecaoCop(i);if(navigator.clipboard&&navigator.clipboard.writeText)navigator.clipboard.writeText(o.resp).catch(()=>{});setTimeout(()=>setObjecaoCop(null),2000);}} style={{background:"#FFF",borderRadius:"14px",padding:"16px",marginBottom:"10px",boxShadow:"0 2px 10px rgba(26,58,92,0.07)",cursor:"pointer",borderLeft:"4px solid "+(objecaoCop===i?"#1B5E20":"#1A3A5C")}}><div style={{fontWeight:"bold",color:"#1A3A5C",fontSize:"13px",marginBottom:"8px"}}>❓ {o.obj}</div><div style={{fontSize:"12px",color:"#6B7A8D",whiteSpace:"pre-wrap",lineHeight:"1.65"}}>{o.resp}</div><div style={{marginTop:"8px",fontSize:"11px",color:objecaoCop===i?"#1B5E20":"#CCC",fontWeight:"bold"}}>{objecaoCop===i?"✅ Copiado!":"Toque para copiar"}</div></div>)}
+          </div>}
+
+          {secaoConfig==="log"&&<div>
+            <div style={{fontWeight:"bold",color:"#1A3A5C",fontSize:"13px",marginBottom:"12px"}}>📋 Atividades Recentes ({log.length})</div>
+            {log.length===0?<div style={{textAlign:"center",color:"#6B7A8D",padding:"24px 0"}}>Nenhuma atividade.</div>
+            :[...log].reverse().map((entry,i)=><div key={i} style={{background:"#FFF",borderRadius:"12px",padding:"10px 14px",marginBottom:"8px",boxShadow:"0 1px 6px rgba(26,58,92,0.07)"}}><div style={{display:"flex",justifyContent:"space-between",marginBottom:"3px"}}><span style={{fontWeight:"bold",color:"#1A3A5C",fontSize:"12px"}}>👤 {entry.user||"Sistema"}</span><span style={{fontSize:"10px",color:"#AAA"}}>{entry.hora||""}</span></div><div style={{fontSize:"12px",color:"#1C2B3A"}}>{entry.acao||"—"}</div></div>)}
+          </div>}
+        </div>}
+
+      </div>
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+</script>
+</body>
+</html>
